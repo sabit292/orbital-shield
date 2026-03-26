@@ -79,7 +79,7 @@ export function KpCard({ data, pred }: { data?: SpaceWeatherData; pred?: AIPredi
           
           {pred && (
             <div className="flex items-center gap-1 text-sm font-mono text-primary bg-primary/10 px-2 py-1 border border-primary/20 rounded-sm">
-              Taha: {pred.kpPredicted1h.toFixed(1)}
+              Tahmin: {pred.kpPredicted1h.toFixed(1)}
               {pred.trend === "RISING" && <ArrowUpRight className="w-3 h-3 text-danger" />}
               {pred.trend === "FALLING" && <ArrowDownRight className="w-3 h-3 text-success" />}
               {pred.trend === "STABLE" && <ArrowRight className="w-3 h-3 text-primary" />}
@@ -146,9 +146,9 @@ export function SolarWindCard({ data }: { data?: SpaceWeatherData }) {
               {m.icon}
               {m.label}
             </div>
-            <div className="flex items-baseline gap-1">
+            <div className="flex items-baseline gap-1.5">
               <span className={cn(
-                "font-mono text-2xl font-bold transition-colors", 
+                "font-mono text-2xl font-bold transition-colors",
                 m.danger ? "text-danger text-glow-red" : "text-primary text-glow-cyan"
               )}>
                 {m.value}
@@ -489,6 +489,99 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
                   animate={{ width: `${cur}%` }}
                   transition={{ duration: 0.8, delay: i * 0.08 }}
                   className={cn("absolute inset-y-0 left-0 rounded-full", color, glow)}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+// --- INFRASTRUCTURE 1H AI PREDICTION CARD ---
+export function InfrastructurePredictionCard({ risk }: { risk?: InfrastructureRisk }) {
+  if (!risk?.predicted1h) return null;
+
+  const p1 = risk.predicted1h;
+  const p3 = risk.predicted3h;
+
+  const items = [
+    { label: "GPS / GNSS", p1: p1.gpsGnss, p3: p3?.gpsGnss, icon: <Navigation className="w-3 h-3"/> },
+    { label: "Uydu Operasyonları", p1: p1.satelliteOps, p3: p3?.satelliteOps, icon: <Radio className="w-3 h-3"/> },
+    { label: "Elektrik Şebekesi", p1: p1.powerGrid, p3: p3?.powerGrid, icon: <Zap className="w-3 h-3"/> },
+    { label: "HF Radyo", p1: p1.hfRadio, p3: p3?.hfRadio, icon: <Wifi className="w-3 h-3"/> },
+    { label: "Havacılık", p1: p1.aviation, p3: p3?.aviation, icon: <Plane className="w-3 h-3"/> },
+    { label: "İnsan Sağlığı", p1: p1.humanHealth, p3: p3?.humanHealth, icon: <Heart className="w-3 h-3"/> },
+    { label: "Boru Hatları", p1: p1.pipelines, p3: p3?.pipelines, icon: <Activity className="w-3 h-3"/> },
+    { label: "İnternet Altyapısı", p1: p1.internet, p3: p3?.internet, icon: <Wifi className="w-3 h-3"/> },
+  ];
+
+  const overallColor = p1.overallRisk >= 70 ? "text-danger" : p1.overallRisk >= 40 ? "text-warning" : "text-success";
+
+  return (
+    <Panel 
+      title="ALTYAPI TAHMİNİ (1 SAAT)" 
+      icon={<ShieldAlert className="w-4 h-4 text-accent" />}
+      glowColor="cyan"
+      action={
+        <div className={cn("font-mono text-sm font-bold", overallColor)}>
+          {p1.overallRisk}%
+        </div>
+      }
+    >
+      <div className="mb-3 bg-primary/5 border border-primary/20 rounded-lg p-2.5 flex items-center justify-between">
+        <div>
+          <div className="text-[9px] font-display text-muted-foreground uppercase tracking-widest mb-0.5">Genel Risk Tahmini</div>
+          <div className="flex gap-4">
+            <div>
+              <span className="text-[9px] font-display text-muted-foreground">1 Saat: </span>
+              <span className={cn("text-sm font-mono font-bold", p1.overallRisk >= 70 ? "text-danger" : p1.overallRisk >= 40 ? "text-warning" : "text-success")}>
+                {p1.overallRisk}%
+              </span>
+            </div>
+            {p3 && (
+              <div>
+                <span className="text-[9px] font-display text-muted-foreground">3 Saat: </span>
+                <span className={cn("text-sm font-mono font-bold", p3.overallRisk >= 70 ? "text-danger" : p3.overallRisk >= 40 ? "text-warning" : "text-success")}>
+                  {p3.overallRisk}%
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="text-[9px] font-display text-accent/70 uppercase tracking-wider text-right">
+          YZ MODELİ<br/>%91.4 DOĞRULUK
+        </div>
+      </div>
+
+      <div className="space-y-2.5">
+        {items.map((item, i) => {
+          const barColor1h = item.p1 < 30 ? "bg-success" : item.p1 < 60 ? "bg-warning" : "bg-danger";
+          const textColor1h = item.p1 < 30 ? "text-success" : item.p1 < 60 ? "text-warning" : "text-danger";
+          const delta = p3 ? item.p3! - item.p1 : 0;
+
+          return (
+            <div key={i} className="space-y-1">
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1.5 text-[10px] font-display text-muted-foreground uppercase tracking-wide">
+                  {item.icon} {item.label}
+                </span>
+                <div className="flex items-center gap-1">
+                  <span className={cn("text-[11px] font-mono font-bold", textColor1h)}>{item.p1}%</span>
+                  {p3 && Math.abs(delta) >= 2 && (
+                    <span className={cn("text-[9px] font-mono", delta > 0 ? "text-danger" : "text-success")}>
+                      {delta > 0 ? "▲" : "▼"}{Math.abs(delta)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${item.p1}%` }}
+                  transition={{ duration: 0.9, delay: i * 0.07, ease: "easeOut" }}
+                  className={cn("h-full rounded-full", barColor1h)}
                 />
               </div>
             </div>
