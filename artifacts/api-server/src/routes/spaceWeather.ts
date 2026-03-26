@@ -239,23 +239,44 @@ type RiskValues = {
 };
 
 function calcRiskValues(kp: number, bz: number, speed: number, xrayFlux: number, dst: number): RiskValues {
-  const kpN = kp / 9;
-  const bzN = Math.min(1, Math.abs(Math.min(bz, 0)) / 20);
-  const speedN = Math.min(1, (speed - 300) / 500);
-  const xrayN = Math.min(1, (Math.log10(Math.max(xrayFlux, 1e-10)) + 7) / 4);
-  const dstN = Math.min(1, Math.abs(Math.min(dst, 0)) / 150);
+  // Normalize each parameter to 0–1 based on NOAA/SWPC physical scales
+  const kpN    = kp / 9;                                                     // Kp 0–9
+  const bzN    = Math.min(1, Math.abs(Math.min(bz, 0)) / 25);               // southward Bz only, up to -25 nT
+  const speedN = Math.min(1, Math.max(0, (speed - 300) / 500));              // 300–800 km/s
+  const xrayN  = Math.min(1, Math.max(0, (Math.log10(Math.max(xrayFlux, 1e-9)) + 8) / 4)); // B→X class log scale
+  const dstN   = Math.min(1, Math.abs(Math.min(dst, 0)) / 150);             // Dst 0 to -150 nT
+
   const clamp = (v: number) => Math.round(Math.min(100, Math.max(0, v * 100)));
-  return {
-    gpsGnss: clamp(kpN * 0.5 + bzN * 0.3 + speedN * 0.2),
-    satelliteOps: clamp(kpN * 0.4 + xrayN * 0.4 + speedN * 0.2),
-    powerGrid: clamp(kpN * 0.5 + dstN * 0.4 + bzN * 0.1),
-    hfRadio: clamp(xrayN * 0.6 + kpN * 0.3 + speedN * 0.1),
-    aviation: clamp(kpN * 0.4 + xrayN * 0.3 + speedN * 0.3),
-    humanHealth: clamp(kpN * 0.3 + xrayN * 0.4 + speedN * 0.3),
-    pipelines: clamp(dstN * 0.5 + kpN * 0.4 + bzN * 0.1),
-    internet: clamp(kpN * 0.3 + xrayN * 0.3 + speedN * 0.4),
-    overallRisk: clamp((kpN + bzN + speedN + xrayN + dstN) / 5),
-  };
+
+  // Weights based on NOAA space weather effects reference:
+  // GPS/GNSS: ionospheric scintillation (Kp, Bz) + radio blackout (X-ray) + speed-driven TEC
+  const gpsGnss      = clamp(kpN * 0.40 + xrayN * 0.30 + bzN * 0.20 + speedN * 0.10);
+
+  // Satellite Ops: radiation (X-ray, speed/particle flux) + orbital drag (Kp) + charging (Bz)
+  const satelliteOps = clamp(xrayN * 0.35 + kpN * 0.35 + speedN * 0.20 + bzN * 0.10);
+
+  // Power Grid: GICs driven by dB/dt — best indicated by Dst and Kp; Bz modulates ring current
+  const powerGrid    = clamp(dstN * 0.45 + kpN * 0.35 + bzN * 0.15 + speedN * 0.05);
+
+  // HF Radio: D-layer absorption (X-ray) + polar cap absorption (Kp) + propagation changes (speed)
+  const hfRadio      = clamp(xrayN * 0.60 + kpN * 0.25 + speedN * 0.10 + bzN * 0.05);
+
+  // Aviation: polar radiation dose (X-ray, speed) + HF comm loss (X-ray) + GPS nav (Kp)
+  const aviation     = clamp(xrayN * 0.35 + speedN * 0.25 + kpN * 0.25 + bzN * 0.15);
+
+  // Human Health: radiation (X-ray, speed-driven SEPs), mainly astronauts/aircraft crew
+  const humanHealth  = clamp(xrayN * 0.45 + speedN * 0.30 + kpN * 0.20 + bzN * 0.05);
+
+  // Pipelines: GICs (same drivers as power grid: Dst, Kp), Bz secondary
+  const pipelines    = clamp(dstN * 0.50 + kpN * 0.35 + bzN * 0.10 + speedN * 0.05);
+
+  // Internet/Undersea cables: GICs (Dst dominant), also X-ray for sat links, speed for SEPs
+  const internet     = clamp(dstN * 0.35 + xrayN * 0.25 + kpN * 0.25 + speedN * 0.15);
+
+  // Overall: Kp and Bz are primary geomagnetic drivers; X-ray for solar effects; speed and Dst secondary
+  const overallRisk  = clamp(kpN * 0.30 + bzN * 0.25 + xrayN * 0.20 + speedN * 0.15 + dstN * 0.10);
+
+  return { gpsGnss, satelliteOps, powerGrid, hfRadio, aviation, humanHealth, pipelines, internet, overallRisk };
 }
 
 // ─── Routes ────────────────────────────────────────────────────────────────

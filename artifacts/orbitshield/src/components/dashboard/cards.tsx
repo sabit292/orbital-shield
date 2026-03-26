@@ -199,7 +199,11 @@ export function XRayCard({ data }: { data?: SpaceWeatherData }) {
 function sampleTicks(data: Array<{ time: string }>, maxTicks = 8): string[] {
   if (!data.length) return [];
   const step = Math.max(1, Math.floor(data.length / maxTicks));
-  return data.filter((_, i) => i % step === 0).map(d => d.time);
+  const seen = new Set<string>();
+  return data
+    .filter((_, i) => i % step === 0)
+    .map(d => d.time)
+    .filter(t => { if (seen.has(t)) return false; seen.add(t); return true; });
 }
 
 // --- CHARTS CARD ---
