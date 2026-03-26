@@ -18,6 +18,20 @@ import type {
   HistoricalData, AlertsResponse, AuroraForecast 
 } from "@workspace/api-client-react/src/generated/api.schemas";
 
+// ─── HELPERS ───────────────────────────────────────────────────────────────
+function DeltaBadge({ delta }: { delta: number }) {
+  if (Math.abs(delta) < 2) return null;
+  const rising = delta > 0;
+  return (
+    <span className={cn(
+      "text-[9px] font-mono px-1 py-0.5 rounded-sm ml-1",
+      rising ? "bg-danger/20 text-danger" : "bg-success/20 text-success"
+    )}>
+      {rising ? "▲" : "▼"}{Math.abs(delta)}%
+    </span>
+  );
+}
+
 // --- KP INDEX CARD ---
 export function KpCard({ data, pred }: { data?: SpaceWeatherData; pred?: AIPrediction }) {
   if (!data) return <Panel title="GEZEGEN K-ENDEKSİ" className="min-h-[200px]" />;
@@ -181,61 +195,114 @@ export function XRayCard({ data }: { data?: SpaceWeatherData }) {
   );
 }
 
+// ─── CHART TICK SAMPLER ────────────────────────────────────────────────────
+function sampleTicks(data: Array<{ time: string }>, maxTicks = 8): string[] {
+  if (!data.length) return [];
+  const step = Math.max(1, Math.floor(data.length / maxTicks));
+  return data.filter((_, i) => i % step === 0).map(d => d.time);
+}
+
 // --- CHARTS CARD ---
 export function ChartsCard({ hist }: { hist?: HistoricalData }) {
+  const [activeTab, setActiveTab] = React.useState<"kp" | "bz" | "speed">("kp");
+
   if (!hist || !hist.kpHistory.length) {
-    return <Panel title="TARİHSEL VERİ" className="h-[300px] flex items-center justify-center text-muted-foreground">Veri Bekleniyor...</Panel>;
+    return <Panel title="TARİHSEL VERİ (SON 24 SAAT)" className="h-[340px] flex items-center justify-center text-muted-foreground">Veri Yükleniyor...</Panel>;
   }
 
-  // Format data for chart
-  const data = hist.kpHistory.map(d => ({
-    time: new Date(d.time).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-    kp: d.kp
-  }));
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+
+  const kpData = hist.kpHistory.map(d => ({ time: fmt(d.time), kp: parseFloat(d.kp.toFixed(2)) }));
+  const bzData = hist.bzHistory.map(d => ({ time: fmt(d.time), bz: parseFloat(d.value.toFixed(2)) }));
+  const speedData = hist.speedHistory.map(d => ({ time: fmt(d.time), speed: parseFloat(d.value.toFixed(0)) }));
+
+  const tabs = [
+    { id: "kp" as const, label: "Kp ENDEKSİ" },
+    { id: "bz" as const, label: "Bz MANYETİK" },
+    { id: "speed" as const, label: "GÜNEŞ RÜZGARI HIZ" },
+  ];
+
+  const kpTicks = sampleTicks(kpData);
+  const bzTicks = sampleTicks(bzData);
+  const speedTicks = sampleTicks(speedData);
+
+  const tooltipStyle = {
+    contentStyle: {
+      backgroundColor: 'rgba(4, 13, 26, 0.95)',
+      borderColor: 'hsl(var(--primary))',
+      borderRadius: '8px',
+      fontFamily: 'var(--font-mono)',
+      fontSize: '11px',
+    },
+    itemStyle: { color: 'hsl(var(--primary))' },
+  };
 
   return (
-    <Panel title="KP ENDEKSİ (SON 24 SAAT)" className="h-[300px]">
-      <div className="w-full h-full mt-2">
+    <Panel title="TARİHSEL VERİ (SON 24 SAAT)" className="h-[340px]">
+      {/* Tab selector */}
+      <div className="flex gap-1 mb-3">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={cn(
+              "text-[9px] font-display uppercase tracking-widest px-2 py-1 rounded-sm border transition-all",
+              activeTab === t.id
+                ? "bg-primary/20 border-primary/50 text-primary"
+                : "border-white/10 text-muted-foreground hover:border-white/20 hover:text-foreground"
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="w-full" style={{ height: 220 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-            <defs>
-              <linearGradient id="colorKp" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
-                <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-            <XAxis 
-              dataKey="time" 
-              stroke="rgba(255,255,255,0.3)" 
-              tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-              tickMargin={10}
-            />
-            <YAxis 
-              stroke="rgba(255,255,255,0.3)" 
-              tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-              domain={[0, 9]}
-              ticks={[0, 3, 6, 9]}
-            />
-            <Tooltip 
-              contentStyle={{ 
-                backgroundColor: 'rgba(4, 13, 26, 0.9)', 
-                borderColor: 'hsl(var(--primary))',
-                borderRadius: '8px',
-                fontFamily: 'var(--font-mono)'
-              }} 
-              itemStyle={{ color: 'hsl(var(--primary))' }}
-            />
-            <Area 
-              type="monotone" 
-              dataKey="kp" 
-              stroke="hsl(var(--primary))" 
-              strokeWidth={2}
-              fillOpacity={1} 
-              fill="url(#colorKp)" 
-              animationDuration={1500}
-            />
-          </AreaChart>
+          {activeTab === "kp" ? (
+            <AreaChart data={kpData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gradKp" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.5}/>
+                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+              <XAxis dataKey="time" stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 9, fontFamily: 'var(--font-mono)' }} ticks={kpTicks} tickMargin={6} />
+              <YAxis stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 9, fontFamily: 'var(--font-mono)' }} domain={[0, 9]} ticks={[0, 3, 6, 9]} />
+              <Tooltip {...tooltipStyle} formatter={(v: number) => [v.toFixed(2), "Kp"]} />
+              <Area type="monotone" dataKey="kp" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#gradKp)" dot={false} animationDuration={800} />
+            </AreaChart>
+          ) : activeTab === "bz" ? (
+            <AreaChart data={bzData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gradBz" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f97316" stopOpacity={0.4}/>
+                  <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+              <XAxis dataKey="time" stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 9, fontFamily: 'var(--font-mono)' }} ticks={bzTicks} tickMargin={6} />
+              <YAxis stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 9, fontFamily: 'var(--font-mono)' }} />
+              <Tooltip {...tooltipStyle} formatter={(v: number) => [`${v.toFixed(2)} nT`, "Bz"]} />
+              <Area type="monotone" dataKey="bz" stroke="#f97316" strokeWidth={2} fillOpacity={1} fill="url(#gradBz)" dot={false} animationDuration={800} />
+            </AreaChart>
+          ) : (
+            <AreaChart data={speedData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gradSpeed" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#a855f7" stopOpacity={0.4}/>
+                  <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+              <XAxis dataKey="time" stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 9, fontFamily: 'var(--font-mono)' }} ticks={speedTicks} tickMargin={6} />
+              <YAxis stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 9, fontFamily: 'var(--font-mono)' }} />
+              <Tooltip {...tooltipStyle} formatter={(v: number) => [`${v} km/s`, "Hız"]} />
+              <Area type="monotone" dataKey="speed" stroke="#a855f7" strokeWidth={2} fillOpacity={1} fill="url(#gradSpeed)" dot={false} animationDuration={800} />
+            </AreaChart>
+          )}
         </ResponsiveContainer>
       </div>
     </Panel>
@@ -353,37 +420,75 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
   if (!risk) return <Panel title="ALTYAPI RİSK ANALİZİ" />;
 
   const items = [
-    { label: "GPS / GNSS", val: risk.gpsGnss, icon: <Navigation className="w-3 h-3"/> },
-    { label: "Uydu Operasyonları", val: risk.satelliteOps, icon: <Radio className="w-3 h-3"/> },
-    { label: "Elektrik Şebekesi", val: risk.powerGrid, icon: <Zap className="w-3 h-3"/> },
-    { label: "HF Radyo", val: risk.hfRadio, icon: <Wifi className="w-3 h-3"/> },
-    { label: "Havacılık", val: risk.aviation, icon: <Plane className="w-3 h-3"/> },
-    { label: "İnsan Sağlığı", val: risk.humanHealth, icon: <Heart className="w-3 h-3"/> },
+    { label: "GPS / GNSS", val: risk.gpsGnss, p1: risk.predicted1h?.gpsGnss, icon: <Navigation className="w-3 h-3"/> },
+    { label: "Uydu Operasyonları", val: risk.satelliteOps, p1: risk.predicted1h?.satelliteOps, icon: <Radio className="w-3 h-3"/> },
+    { label: "Elektrik Şebekesi", val: risk.powerGrid, p1: risk.predicted1h?.powerGrid, icon: <Zap className="w-3 h-3"/> },
+    { label: "HF Radyo", val: risk.hfRadio, p1: risk.predicted1h?.hfRadio, icon: <Wifi className="w-3 h-3"/> },
+    { label: "Havacılık", val: risk.aviation, p1: risk.predicted1h?.aviation, icon: <Plane className="w-3 h-3"/> },
+    { label: "İnsan Sağlığı", val: risk.humanHealth, p1: risk.predicted1h?.humanHealth, icon: <Heart className="w-3 h-3"/> },
   ];
 
+  const trendIcon = risk.trend === "RISING" ? "▲" : risk.trend === "FALLING" ? "▼" : "▶";
+  const trendColor = risk.trend === "RISING" ? "text-danger" : risk.trend === "FALLING" ? "text-success" : "text-primary";
+
   return (
-    <Panel title="ALTYAPI RİSK ANALİZİ" icon={<Shield className="w-4 h-4" />}>
-      <div className="space-y-4 mt-2">
+    <Panel 
+      title="ALTYAPI RİSK ANALİZİ" 
+      icon={<Shield className="w-4 h-4" />}
+      action={
+        <span className={cn("text-[9px] font-display font-bold uppercase tracking-widest flex items-center gap-1", trendColor)}>
+          <span>{trendIcon}</span>
+          {risk.trend === "RISING" ? "ARTIYOR" : risk.trend === "FALLING" ? "AZALIYOR" : "İSTİKRARLI"}
+        </span>
+      }
+    >
+      {/* Legend */}
+      <div className="flex gap-3 mb-3 mt-1">
+        <div className="flex items-center gap-1.5 text-[9px] font-mono text-muted-foreground">
+          <div className="w-3 h-1.5 rounded-full bg-primary/70" /> ŞİMDİ
+        </div>
+        <div className="flex items-center gap-1.5 text-[9px] font-mono text-muted-foreground">
+          <div className="w-3 h-1.5 rounded-full bg-white/25 border border-white/30" /> 1S SONRA (YZ)
+        </div>
+      </div>
+
+      <div className="space-y-3">
         {items.map((item, i) => {
-          const color = item.val < 30 ? "bg-success" : item.val < 60 ? "bg-warning" : "bg-danger";
-          const glow = item.val < 30 ? "shadow-[0_0_8px_hsl(var(--success))]" : 
-                       item.val < 60 ? "shadow-[0_0_8px_hsl(var(--warning))]" : 
-                       "shadow-[0_0_8px_hsl(var(--danger))]";
-                       
+          const cur = item.val;
+          const pred = item.p1 ?? cur;
+          const delta = pred - cur;
+          const color = cur < 30 ? "bg-success" : cur < 60 ? "bg-warning" : "bg-danger";
+          const glow = cur < 30 ? "shadow-[0_0_6px_hsl(var(--success))]" :
+                       cur < 60 ? "shadow-[0_0_6px_hsl(var(--warning))]" :
+                       "shadow-[0_0_6px_hsl(var(--danger))]";
+          const predColor = pred < 30 ? "bg-success/40" : pred < 60 ? "bg-warning/40" : "bg-danger/40";
+
           return (
-            <div key={i} className="space-y-1.5">
+            <div key={i} className="space-y-1">
               <div className="flex justify-between text-xs font-display items-center">
                 <span className="flex items-center gap-1.5 text-muted-foreground uppercase tracking-wide">
                   {item.icon} {item.label}
                 </span>
-                <span className="font-mono font-bold">{item.val}%</span>
+                <div className="flex items-center">
+                  <span className="font-mono font-bold">{cur}%</span>
+                  <DeltaBadge delta={delta} />
+                </div>
               </div>
-              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                <motion.div 
+              {/* Stacked bar: current + predicted overlay */}
+              <div className="relative h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                {/* Predicted bar (behind, lighter) */}
+                <motion.div
                   initial={{ width: 0 }}
-                  animate={{ width: `${item.val}%` }}
-                  transition={{ duration: 1, delay: i * 0.1 }}
-                  className={cn("h-full rounded-full", color, glow)} 
+                  animate={{ width: `${pred}%` }}
+                  transition={{ duration: 0.8, delay: i * 0.08 }}
+                  className={cn("absolute inset-y-0 left-0 rounded-full", predColor)}
+                />
+                {/* Current bar (front, solid) */}
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${cur}%` }}
+                  transition={{ duration: 0.8, delay: i * 0.08 }}
+                  className={cn("absolute inset-y-0 left-0 rounded-full", color, glow)}
                 />
               </div>
             </div>

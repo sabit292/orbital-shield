@@ -155,6 +155,30 @@ export interface AlertsResponse {
   totalCount: number;
 }
 
+/**
+ * Overall risk trend
+ */
+export type InfrastructureRiskTrend =
+  (typeof InfrastructureRiskTrend)[keyof typeof InfrastructureRiskTrend];
+
+export const InfrastructureRiskTrend = {
+  RISING: "RISING",
+  STABLE: "STABLE",
+  FALLING: "FALLING",
+} as const;
+
+export interface InfrastructureRiskValues {
+  gpsGnss: number;
+  satelliteOps: number;
+  powerGrid: number;
+  hfRadio: number;
+  aviation: number;
+  humanHealth: number;
+  pipelines: number;
+  internet: number;
+  overallRisk: number;
+}
+
 export interface InfrastructureRisk {
   /** GPS/GNSS disruption risk (0-100) */
   gpsGnss: number;
@@ -174,6 +198,10 @@ export interface InfrastructureRisk {
   internet: number;
   /** Overall infrastructure risk (0-100) */
   overallRisk: number;
+  predicted1h: InfrastructureRiskValues;
+  predicted3h: InfrastructureRiskValues;
+  /** Overall risk trend */
+  trend: InfrastructureRiskTrend;
 }
 
 export interface KpDataPoint {

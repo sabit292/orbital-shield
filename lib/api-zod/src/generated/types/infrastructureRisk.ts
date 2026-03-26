@@ -5,6 +5,8 @@
  * OrbitShield Space Weather AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { InfrastructureRiskTrend } from "./infrastructureRiskTrend";
+import type { InfrastructureRiskValues } from "./infrastructureRiskValues";
 
 export interface InfrastructureRisk {
   /** GPS/GNSS disruption risk (0-100) */
@@ -25,4 +27,8 @@ export interface InfrastructureRisk {
   internet: number;
   /** Overall infrastructure risk (0-100) */
   overallRisk: number;
+  predicted1h: InfrastructureRiskValues;
+  predicted3h: InfrastructureRiskValues;
+  /** Overall risk trend */
+  trend: InfrastructureRiskTrend;
 }

@@ -117,6 +117,31 @@ export const GetInfrastructureRiskResponse = zod.object({
     .number()
     .describe("Internet\/fiber infrastructure risk (0-100)"),
   overallRisk: zod.number().describe("Overall infrastructure risk (0-100)"),
+  predicted1h: zod.object({
+    gpsGnss: zod.number(),
+    satelliteOps: zod.number(),
+    powerGrid: zod.number(),
+    hfRadio: zod.number(),
+    aviation: zod.number(),
+    humanHealth: zod.number(),
+    pipelines: zod.number(),
+    internet: zod.number(),
+    overallRisk: zod.number(),
+  }),
+  predicted3h: zod.object({
+    gpsGnss: zod.number(),
+    satelliteOps: zod.number(),
+    powerGrid: zod.number(),
+    hfRadio: zod.number(),
+    aviation: zod.number(),
+    humanHealth: zod.number(),
+    pipelines: zod.number(),
+    internet: zod.number(),
+    overallRisk: zod.number(),
+  }),
+  trend: zod
+    .enum(["RISING", "STABLE", "FALLING"])
+    .describe("Overall risk trend"),
 });
 
 /**

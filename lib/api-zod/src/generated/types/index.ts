@@ -15,6 +15,8 @@ export * from "./auroraForecastIntensity";
 export * from "./healthStatus";
 export * from "./historicalData";
 export * from "./infrastructureRisk";
+export * from "./infrastructureRiskTrend";
+export * from "./infrastructureRiskValues";
 export * from "./kpDataPoint";
 export * from "./magneticFieldData";
 export * from "./solarWindData";

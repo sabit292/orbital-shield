@@ -356,6 +356,49 @@ components:
         overallRisk:
           type: number
           description: Overall infrastructure risk (0-100)
+        predicted1h:
+          $ref: "#/components/schemas/InfrastructureRiskValues"
+        predicted3h:
+          $ref: "#/components/schemas/InfrastructureRiskValues"
+        trend:
+          type: string
+          enum: [RISING, STABLE, FALLING]
+          description: Overall risk trend
+      required:
+        - gpsGnss
+        - satelliteOps
+        - powerGrid
+        - hfRadio
+        - aviation
+        - humanHealth
+        - pipelines
+        - internet
+        - overallRisk
+        - predicted1h
+        - predicted3h
+        - trend
+
+    InfrastructureRiskValues:
+      type: object
+      properties:
+        gpsGnss:
+          type: number
+        satelliteOps:
+          type: number
+        powerGrid:
+          type: number
+        hfRadio:
+          type: number
+        aviation:
+          type: number
+        humanHealth:
+          type: number
+        pipelines:
+          type: number
+        internet:
+          type: number
+        overallRisk:
+          type: number
       required:
         - gpsGnss
         - satelliteOps
