@@ -17,25 +17,37 @@ export function StarField() {
     let animId: number;
     let t = 0;
 
-    // ── WARP STARS ──────────────────────────────────────────────────
-    interface WarpStar {
-      x: number; y: number; z: number;
-      px: number; py: number;
-      speed: number; hue: number;
+    // ── HORIZONTAL DRIFTING STARS ────────────────────────────────────
+    // Stars glide smoothly from right to left at varying speeds/depths
+    interface DriftStar {
+      x: number; y: number;
+      speed: number;       // horizontal drift speed (px/frame)
+      size: number;
+      opacity: number;
+      hue: number;
+      twinkle: number;
+      twinkleOff: number;
+      trail: number;       // trail length
     }
-    const NUM_WARP = 220;
-    const warpStars: WarpStar[] = [];
-    function spawnWarp(): WarpStar {
+    const NUM_DRIFT = 320;
+    const driftStars: DriftStar[] = [];
+
+    function spawnDrift(startX?: number): DriftStar {
+      const depth = Math.random();  // 0 = far, 1 = close
       return {
-        x: (Math.random() - 0.5) * W,
-        y: (Math.random() - 0.5) * H,
-        z: Math.random() * W,
-        px: 0, py: 0,
-        speed: 1.2 + Math.random() * 1.8,
-        hue: 180 + Math.random() * 80,
+        x: startX ?? Math.random() * (W + 200),
+        y: Math.random() * H,
+        speed: 0.15 + depth * 1.1,
+        size: 0.3 + depth * 1.8,
+        opacity: 0.1 + depth * 0.75,
+        hue: 180 + Math.random() * 100,
+        twinkle: 0.4 + Math.random() * 1.2,
+        twinkleOff: Math.random() * Math.PI * 2,
+        trail: 2 + depth * 22,
       };
     }
-    for (let i = 0; i < NUM_WARP; i++) warpStars.push(spawnWarp());
+
+    for (let i = 0; i < NUM_DRIFT; i++) driftStars.push(spawnDrift());
 
     // ── SPIRAL GALAXY STARS ─────────────────────────────────────────
     interface GalaxyStar {
@@ -75,11 +87,11 @@ export function StarField() {
     }
     const meteors: Meteor[] = [];
     function spawnMeteor(): Meteor {
-      const angle = -Math.PI * 0.2 - Math.random() * 0.3;
-      const speed = 14 + Math.random() * 22;
+      const angle = -Math.PI * 0.18 - Math.random() * 0.28;
+      const speed = 12 + Math.random() * 20;
       return {
         x: Math.random() * W,
-        y: Math.random() * H * 0.4,
+        y: Math.random() * H * 0.45,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         len: 80 + Math.random() * 180,
@@ -133,24 +145,22 @@ export function StarField() {
       plasmaRings.push(ring);
     }
 
-    // ── BUILD STATIC DEEP SPACE LAYER ────────────────────────────────
+    // ── STATIC DEEP SPACE LAYER ───────────────────────────────────────
     const deepCanvas = document.createElement("canvas");
     deepCanvas.width = W; deepCanvas.height = H;
     const dctx = deepCanvas.getContext("2d")!;
 
     function buildDeepSpace() {
       deepCanvas.width = W; deepCanvas.height = H;
-      // Pitch black base
       dctx.fillStyle = "#000409";
       dctx.fillRect(0, 0, W, H);
 
-      // Grand nebula clouds
       const clouds = [
         { x: W * 0.15, y: H * 0.25, r: W * 0.45, h: 230, s: 75, a: 0.055 },
-        { x: W * 0.8, y: H * 0.7, r: W * 0.4, h: 270, s: 70, a: 0.05 },
-        { x: W * 0.5, y: H * 0.55, r: W * 0.35, h: 300, s: 60, a: 0.04 },
-        { x: W * 0.3, y: H * 0.8, r: W * 0.3, h: 200, s: 65, a: 0.035 },
-        { x: W * 0.85, y: H * 0.15, r: W * 0.32, h: 180, s: 70, a: 0.03 },
+        { x: W * 0.8,  y: H * 0.7,  r: W * 0.4,  h: 270, s: 70, a: 0.05  },
+        { x: W * 0.5,  y: H * 0.55, r: W * 0.35, h: 300, s: 60, a: 0.04  },
+        { x: W * 0.3,  y: H * 0.8,  r: W * 0.3,  h: 200, s: 65, a: 0.035 },
+        { x: W * 0.85, y: H * 0.15, r: W * 0.32, h: 180, s: 70, a: 0.03  },
       ];
       for (const c of clouds) {
         const g = dctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r);
@@ -161,12 +171,12 @@ export function StarField() {
         dctx.fillRect(0, 0, W, H);
       }
 
-      // Static distant stars
+      // Static distant background stars
       for (let i = 0; i < 500; i++) {
         const sx = Math.random() * W;
         const sy = Math.random() * H;
-        const sr = Math.random() * 0.7;
-        const sa = 0.1 + Math.random() * 0.35;
+        const sr = Math.random() * 0.65;
+        const sa = 0.08 + Math.random() * 0.28;
         const sh = 180 + Math.random() * 120;
         dctx.beginPath();
         dctx.arc(sx, sy, sr, 0, Math.PI * 2);
@@ -195,7 +205,6 @@ export function StarField() {
         if (p.x > W + p.r) p.x = -p.r;
         if (p.y < -p.r) p.y = H + p.r;
         if (p.y > H + p.r) p.y = -p.r;
-
         const alpha = p.opacity * (0.7 + 0.3 * Math.sin(t * p.pulse));
         const g = ctx!.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
         g.addColorStop(0, `hsla(${p.hue},75%,45%,${alpha})`);
@@ -241,7 +250,6 @@ export function StarField() {
       ctx!.fillStyle = core1;
       ctx!.fillRect(cx - coreR, cy - coreR, coreR * 2, coreR * 2);
 
-      // Core outer glow
       const core2 = ctx!.createRadialGradient(cx, cy, 0, cx, cy, galR * 0.22 * pulse);
       core2.addColorStop(0, `rgba(255,200,100,${0.12 * pulse})`);
       core2.addColorStop(0.5, `rgba(180,80,220,${0.06 * pulse})`);
@@ -254,7 +262,6 @@ export function StarField() {
         ring.r += ring.speed;
         const progress = ring.r / ring.maxR;
         const alpha = ring.opacity * (1 - progress) * (1 - progress);
-
         if (alpha > 0.005) {
           ctx!.beginPath();
           ctx!.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2);
@@ -265,78 +272,64 @@ export function StarField() {
           ctx!.stroke();
           ctx!.shadowBlur = 0;
         }
-
-        if (ring.r >= ring.maxR) {
-          Object.assign(ring, spawnRing());
-        }
+        if (ring.r >= ring.maxR) Object.assign(ring, spawnRing());
       }
-      // Spawn new rings randomly
       if (Math.random() < 0.008 && plasmaRings.length < 6) plasmaRings.push(spawnRing());
 
-      // ── Warp star streaks ──
-      ctx!.save();
-      ctx!.translate(cx, cy);
-      for (const s of warpStars) {
-        s.px = s.x / s.z;
-        s.py = s.y / s.z;
-        s.z -= s.speed;
+      // ── Horizontal drifting stars (right → left) ──────────────────
+      for (const s of driftStars) {
+        s.x -= s.speed;
 
-        if (s.z <= 0) {
-          Object.assign(s, spawnWarp());
-          continue;
+        // Wrap around to the right when off-screen left
+        if (s.x < -s.trail - 4) {
+          s.x = W + s.trail + 4;
+          s.y = Math.random() * H;
         }
 
-        const nx = s.x / s.z;
-        const ny = s.y / s.z;
-        const brightness = 1 - s.z / W;
-        const size = Math.max(0.3, brightness * 2.2);
+        const tw = 0.75 + 0.25 * Math.sin(t * s.twinkle + s.twinkleOff);
+        const op = s.opacity * tw;
+        const sz = s.size * tw;
 
-        if (Math.abs(nx) > W * 0.6 || Math.abs(ny) > H * 0.6) {
-          Object.assign(s, spawnWarp());
-          continue;
+        // Trail
+        if (s.trail > 3) {
+          const grad = ctx!.createLinearGradient(s.x + s.trail, s.y, s.x, s.y);
+          grad.addColorStop(0, `hsla(${s.hue},80%,90%,0)`);
+          grad.addColorStop(1, `hsla(${s.hue},80%,90%,${op * 0.45})`);
+          ctx!.beginPath();
+          ctx!.moveTo(s.x + s.trail, s.y);
+          ctx!.lineTo(s.x, s.y);
+          ctx!.strokeStyle = grad;
+          ctx!.lineWidth = sz * 0.55;
+          ctx!.stroke();
         }
 
-        // Streak line
-        const streakLen = brightness * brightness * 18;
+        // Star dot
         ctx!.beginPath();
-        ctx!.moveTo(s.px, s.py);
-        ctx!.lineTo(nx, ny);
-        ctx!.strokeStyle = `hsla(${s.hue},85%,90%,${brightness * 0.55})`;
-        ctx!.lineWidth = size * 0.5;
-        ctx!.stroke();
-
-        // Dot
-        ctx!.beginPath();
-        ctx!.arc(nx, ny, size * 0.7, 0, Math.PI * 2);
-        ctx!.fillStyle = `hsla(${s.hue},80%,95%,${brightness})`;
+        ctx!.arc(s.x, s.y, sz * 0.8, 0, Math.PI * 2);
+        ctx!.fillStyle = `hsla(${s.hue},75%,92%,${op})`;
         ctx!.fill();
 
-        if (brightness > 0.75) {
-          ctx!.shadowBlur = 8;
-          ctx!.shadowColor = `hsla(${s.hue},90%,80%,${brightness * 0.6})`;
+        if (op > 0.55 && sz > 1.2) {
+          ctx!.shadowBlur = sz * 5;
+          ctx!.shadowColor = `hsla(${s.hue},85%,80%,${op * 0.55})`;
           ctx!.fill();
           ctx!.shadowBlur = 0;
         }
       }
-      ctx!.restore();
 
       // ── Meteors ──
       for (let i = meteors.length - 1; i >= 0; i--) {
         const m = meteors[i];
-        m.x += m.vx;
-        m.y += m.vy;
-        m.life++;
-
+        m.x += m.vx; m.y += m.vy; m.life++;
         const progress = m.life / m.maxLife;
         const alpha = m.opacity * Math.sin(progress * Math.PI);
-        const tx = m.x - (m.vx / Math.sqrt(m.vx * m.vx + m.vy * m.vy)) * m.len;
-        const ty = m.y - (m.vy / Math.sqrt(m.vx * m.vx + m.vy * m.vy)) * m.len;
-
+        const spd = Math.sqrt(m.vx * m.vx + m.vy * m.vy);
+        const tx = m.x - (m.vx / spd) * m.len;
+        const ty = m.y - (m.vy / spd) * m.len;
         const grad = ctx!.createLinearGradient(tx, ty, m.x, m.y);
         grad.addColorStop(0, `hsla(${m.hue},90%,95%,0)`);
         grad.addColorStop(0.6, `hsla(${m.hue},90%,90%,${alpha * 0.5})`);
         grad.addColorStop(1, `hsla(${m.hue},90%,100%,${alpha})`);
-
         ctx!.beginPath();
         ctx!.moveTo(tx, ty);
         ctx!.lineTo(m.x, m.y);
@@ -346,15 +339,11 @@ export function StarField() {
         ctx!.shadowColor = `hsla(${m.hue},90%,80%,${alpha * 0.4})`;
         ctx!.stroke();
         ctx!.shadowBlur = 0;
-
-        if (m.life >= m.maxLife || m.x > W + 200 || m.y > H + 200) {
-          meteors.splice(i, 1);
-        }
+        if (m.life >= m.maxLife || m.x > W + 200 || m.y > H + 200) meteors.splice(i, 1);
       }
-      // Spawn meteors
       if (Math.random() < 0.025 && meteors.length < 6) meteors.push(spawnMeteor());
 
-      // ── Aurora bands at edges ──
+      // ── Aurora bands ──
       const auroraA = 0.04 + 0.02 * Math.sin(t * 0.4);
       const aurora1 = ctx!.createLinearGradient(0, 0, 0, H * 0.35);
       aurora1.addColorStop(0, `rgba(0,200,120,${auroraA})`);
