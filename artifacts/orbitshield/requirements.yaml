@@ -1,0 +1,15 @@
+packages:
+  "framer-motion": "For fluid dashboard entry animations and dynamic value changes"
+  "recharts": "For the historical space weather data charts (Kp, Speed, Bz)"
+  "date-fns": "For formatting timestamps and alert dates"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility for merging Tailwind CSS classes safely"
+
+images:
+  - path: "artifacts/orbitshield/public/images/space-bg.png"
+    description: "Deep dark space background with subtle cyan and green nebula dust and a faint futuristic hex grid overlay, extremely dark navy and black tones, suitable for a sci-fi UI background"
+    aspect_ratio: "16:9"
+
+notes:
+  - "The API endpoints are pre-generated in @workspace/api-client-react. We will import the React Query hooks directly from there."
+  - "The UI is designed to look like a high-end, military-grade space weather AI dashboard."

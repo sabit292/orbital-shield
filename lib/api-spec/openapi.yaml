@@ -1,15 +1,16 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: OrbitShield Space Weather AI API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: space-weather
+    description: Space weather data and AI predictions
 paths:
   /healthz:
     get:
@@ -24,6 +25,84 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /space-weather/current:
+    get:
+      operationId: getCurrentSpaceWeather
+      tags: [space-weather]
+      summary: Get current space weather data
+      description: Returns real-time space weather data from NOAA
+      responses:
+        "200":
+          description: Current space weather data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpaceWeatherData"
+  /space-weather/prediction:
+    get:
+      operationId: getAIPrediction
+      tags: [space-weather]
+      summary: Get AI prediction
+      description: Returns AI-powered prediction for upcoming geomagnetic storm risk
+      responses:
+        "200":
+          description: AI prediction result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIPrediction"
+  /space-weather/alerts:
+    get:
+      operationId: getSpaceWeatherAlerts
+      tags: [space-weather]
+      summary: Get active space weather alerts
+      description: Returns active space weather alerts and warnings from NOAA SWPC
+      responses:
+        "200":
+          description: Active alerts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertsResponse"
+  /space-weather/infrastructure-risk:
+    get:
+      operationId: getInfrastructureRisk
+      tags: [space-weather]
+      summary: Get infrastructure risk assessment
+      description: Returns risk assessment for various critical infrastructure systems
+      responses:
+        "200":
+          description: Infrastructure risk data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InfrastructureRisk"
+  /space-weather/history:
+    get:
+      operationId: getSpaceWeatherHistory
+      tags: [space-weather]
+      summary: Get historical Kp index data
+      description: Returns historical Kp index readings for chart display
+      responses:
+        "200":
+          description: Historical data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoricalData"
+  /space-weather/aurora:
+    get:
+      operationId: getAuroraForecast
+      tags: [space-weather]
+      summary: Get aurora forecast
+      description: Returns aurora forecast and visibility information
+      responses:
+        "200":
+          description: Aurora forecast data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuroraForecast"
 components:
   schemas:
     HealthStatus:
@@ -34,3 +113,338 @@ components:
       required:
         - status
 
+    SpaceWeatherData:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        solarWind:
+          $ref: "#/components/schemas/SolarWindData"
+        magneticField:
+          $ref: "#/components/schemas/MagneticFieldData"
+        xray:
+          $ref: "#/components/schemas/XRayData"
+        kpIndex:
+          type: number
+          description: Current Kp index (0-9)
+        kpCategory:
+          type: string
+          description: Storm category (Sakinlik/G1/G2/G3/G4/G5)
+        dstIndex:
+          type: number
+          description: Dst geomagnetic storm index in nT
+        sunspotNumber:
+          type: number
+          description: Current sunspot number
+        solarFluxIndex:
+          type: number
+          description: Solar flux index F10.7
+        protonFlux:
+          type: number
+          description: Proton flux >10 MeV
+        electronFlux:
+          type: number
+          description: Electron flux >2 MeV
+        systemStatus:
+          type: string
+          enum: [LIVE, DEGRADED, OFFLINE]
+      required:
+        - timestamp
+        - solarWind
+        - magneticField
+        - xray
+        - kpIndex
+        - kpCategory
+        - dstIndex
+        - sunspotNumber
+        - solarFluxIndex
+        - protonFlux
+        - electronFlux
+        - systemStatus
+
+    SolarWindData:
+      type: object
+      properties:
+        speed:
+          type: number
+          description: Solar wind speed in km/s
+        density:
+          type: number
+          description: Proton density in p/cm³
+        temperature:
+          type: number
+          description: Temperature in Kelvin
+        pressure:
+          type: number
+          description: Dynamic pressure in nPa
+      required:
+        - speed
+        - density
+        - temperature
+        - pressure
+
+    MagneticFieldData:
+      type: object
+      properties:
+        bz:
+          type: number
+          description: Bz component in nT (southward = negative = more dangerous)
+        bt:
+          type: number
+          description: Total magnetic field in nT
+        bx:
+          type: number
+          description: Bx component in nT
+        by:
+          type: number
+          description: By component in nT
+        phi:
+          type: number
+          description: Phi angle in degrees
+        theta:
+          type: number
+          description: Theta angle in degrees
+      required:
+        - bz
+        - bt
+        - bx
+        - by
+        - phi
+        - theta
+
+    XRayData:
+      type: object
+      properties:
+        flux:
+          type: number
+          description: X-ray flux in W/m²
+        fluxClass:
+          type: string
+          description: X-ray flux classification (A/B/C/M/X)
+        shortWave:
+          type: number
+          description: Short wave flux (0.05-0.4 nm)
+        longWave:
+          type: number
+          description: Long wave flux (0.1-0.8 nm)
+      required:
+        - flux
+        - fluxClass
+        - shortWave
+        - longWave
+
+    AIPrediction:
+      type: object
+      properties:
+        kpPredicted1h:
+          type: number
+          description: Predicted Kp index for next 1 hour
+        kpPredicted3h:
+          type: number
+          description: Predicted Kp index for next 3 hours
+        kpPredicted6h:
+          type: number
+          description: Predicted Kp index for next 6 hours
+        stormProbability1h:
+          type: number
+          description: Storm probability in next 1 hour (0-100)
+        stormProbability24h:
+          type: number
+          description: Storm probability in next 24 hours (0-100)
+        riskScore:
+          type: number
+          description: Overall risk score (0-100)
+        riskLevel:
+          type: string
+          enum: [LOW, MODERATE, HIGH, EXTREME]
+        anomalyDetected:
+          type: boolean
+        confidence:
+          type: number
+          description: AI prediction confidence (0-100)
+        aiInsight:
+          type: string
+          description: AI-generated insight about current conditions
+        trend:
+          type: string
+          enum: [RISING, STABLE, FALLING]
+        modelAccuracy:
+          type: number
+          description: Historical model accuracy percentage
+      required:
+        - kpPredicted1h
+        - kpPredicted3h
+        - kpPredicted6h
+        - stormProbability1h
+        - stormProbability24h
+        - riskScore
+        - riskLevel
+        - anomalyDetected
+        - confidence
+        - aiInsight
+        - trend
+        - modelAccuracy
+
+    AlertsResponse:
+      type: object
+      properties:
+        alerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpaceWeatherAlert"
+        totalCount:
+          type: integer
+      required:
+        - alerts
+        - totalCount
+
+    SpaceWeatherAlert:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [WARNING, WATCH, ALERT, SUMMARY]
+        severity:
+          type: string
+          enum: [LOW, MODERATE, HIGH, EXTREME]
+        product:
+          type: string
+        message:
+          type: string
+        issuedAt:
+          type: string
+        serialNumber:
+          type: string
+      required:
+        - id
+        - type
+        - severity
+        - product
+        - message
+        - issuedAt
+        - serialNumber
+
+    InfrastructureRisk:
+      type: object
+      properties:
+        gpsGnss:
+          type: number
+          description: GPS/GNSS disruption risk (0-100)
+        satelliteOps:
+          type: number
+          description: Satellite operations risk (0-100)
+        powerGrid:
+          type: number
+          description: Power grid risk (0-100)
+        hfRadio:
+          type: number
+          description: HF radio communications risk (0-100)
+        aviation:
+          type: number
+          description: Aviation risk (0-100)
+        humanHealth:
+          type: number
+          description: Human health risk (0-100)
+        pipelines:
+          type: number
+          description: Pipeline/corrosion risk (0-100)
+        internet:
+          type: number
+          description: Internet/fiber infrastructure risk (0-100)
+        overallRisk:
+          type: number
+          description: Overall infrastructure risk (0-100)
+      required:
+        - gpsGnss
+        - satelliteOps
+        - powerGrid
+        - hfRadio
+        - aviation
+        - humanHealth
+        - pipelines
+        - internet
+        - overallRisk
+
+    HistoricalData:
+      type: object
+      properties:
+        kpHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/KpDataPoint"
+        bzHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesPoint"
+        speedHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesPoint"
+        xrayHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesPoint"
+      required:
+        - kpHistory
+        - bzHistory
+        - speedHistory
+        - xrayHistory
+
+    KpDataPoint:
+      type: object
+      properties:
+        time:
+          type: string
+        kp:
+          type: number
+        category:
+          type: string
+      required:
+        - time
+        - kp
+        - category
+
+    TimeSeriesPoint:
+      type: object
+      properties:
+        time:
+          type: string
+        value:
+          type: number
+      required:
+        - time
+        - value
+
+    AuroraForecast:
+      type: object
+      properties:
+        visible:
+          type: boolean
+        intensity:
+          type: string
+          enum: [NONE, WEAK, MODERATE, STRONG, EXTREME]
+        minLatitude:
+          type: number
+          description: Minimum latitude where aurora is visible
+        affectedRegions:
+          type: array
+          items:
+            type: string
+        kpRequired:
+          type: number
+          description: Minimum Kp needed for aurora
+        description:
+          type: string
+        viewingQuality:
+          type: number
+          description: Aurora viewing quality (0-10)
+      required:
+        - visible
+        - intensity
+        - minLatitude
+        - affectedRegions
+        - kpRequired
+        - description
+        - viewingQuality

@@ -1,0 +1,131 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: 'Inter', sans-serif;
+  --font-display: 'Orbitron', sans-serif;
+  --font-mono: 'Rajdhani', monospace;
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+  
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-danger: hsl(var(--danger));
+  
+  --color-border: hsl(var(--border));
+  --color-ring: hsl(var(--ring));
+
+  --animate-pulse-fast: pulse-fast 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-glow: glow 2s ease-in-out infinite alternate;
+}
+
+:root {
+  /* Dark Navy / Deep Space Theme */
+  --background: 222 47% 4%;
+  --foreground: 180 100% 90%;
+  
+  --card: 215 74% 7%;
+  --card-foreground: 180 100% 95%;
+  --card-border: 184 100% 20%;
+  
+  /* Neon Cyan */
+  --primary: 184 100% 50%;
+  --primary-foreground: 222 47% 4%;
+  
+  /* Neon Green */
+  --secondary: 144 100% 50%;
+  --secondary-foreground: 222 47% 4%;
+  
+  /* Neon Purple */
+  --accent: 280 100% 60%;
+  --accent-foreground: 0 0% 100%;
+
+  /* Status Colors */
+  --success: 144 100% 45%;
+  --warning: 35 100% 55%;
+  --danger: 346 100% 50%;
+  
+  --border: 184 100% 20%;
+  --ring: 184 100% 50%;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground font-sans antialiased selection:bg-primary/30 selection:text-primary;
+    background-image: 
+      radial-gradient(circle at 50% 0%, rgba(0, 240, 255, 0.05) 0%, transparent 50%),
+      radial-gradient(circle at 100% 100%, rgba(0, 255, 102, 0.03) 0%, transparent 50%);
+    background-attachment: fixed;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-wide;
+  }
+}
+
+@layer utilities {
+  .text-glow-cyan {
+    text-shadow: 0 0 10px rgba(0, 240, 255, 0.7);
+  }
+  
+  .text-glow-green {
+    text-shadow: 0 0 10px rgba(0, 255, 102, 0.7);
+  }
+  
+  .text-glow-red {
+    text-shadow: 0 0 10px rgba(255, 0, 60, 0.7);
+  }
+  
+  .box-glow-cyan {
+    box-shadow: 0 0 15px rgba(0, 240, 255, 0.15), inset 0 0 20px rgba(0, 240, 255, 0.05);
+  }
+
+  .box-glow-green {
+    box-shadow: 0 0 15px rgba(0, 255, 102, 0.15), inset 0 0 20px rgba(0, 255, 102, 0.05);
+  }
+
+  .box-glow-red {
+    box-shadow: 0 0 15px rgba(255, 0, 60, 0.15), inset 0 0 20px rgba(255, 0, 60, 0.05);
+  }
+
+  /* Custom futuristic scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 240, 255, 0.3);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 240, 255, 0.6);
+  }
+}
+
+@keyframes pulse-fast {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes glow {
+  from { box-shadow: 0 0 5px rgba(0, 240, 255, 0.2), inset 0 0 5px rgba(0, 240, 255, 0.1); }
+  to { box-shadow: 0 0 15px rgba(0, 240, 255, 0.5), inset 0 0 15px rgba(0, 240, 255, 0.2); }
+}
