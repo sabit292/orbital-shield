@@ -16,6 +16,7 @@ import {
 } from "@/components/dashboard/cards";
 import { Gauge } from "@/components/ui/gauge";
 import { StarField } from "@/components/ui/starfield";
+import { AlarmSystem } from "@/components/ui/alarm";
 import { motion } from "framer-motion";
 
 export default function Dashboard() {
@@ -71,6 +72,9 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden pb-12 relative">
       {/* Animated starfield background */}
       <StarField />
+
+      {/* Alarm system (floating) */}
+      <AlarmSystem current={current} prediction={prediction} risk={risk} alerts={alerts} />
 
       <div className="relative z-10">
         {/* HEADER */}

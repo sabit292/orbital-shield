@@ -169,6 +169,11 @@ async function initHistory() {
 initHistory().catch(() => {});
 
 // ─── AI prediction engine ──────────────────────────────────────────────────
+// Physics-based ensemble model using:
+//   1. Persistence (current Kp is the best short-term predictor)
+//   2. Solar wind driver signal (southward Bz + speed = geoeffective conditions)
+//   3. Observed historical trend via linear regression on recent Kp values
+//   4. X-ray flare contribution (solar flares raise Kp 1–3h after onset)
 
 function aiPredict(features: {
   kp: number; bz: number; speed: number; density: number;
@@ -182,38 +187,81 @@ function aiPredict(features: {
 } {
   const { kp, bz, speed, density, xrayFlux, bt, dst } = features;
 
-  const bzFactor = bz < -10 ? 3 : bz < -5 ? 2 : bz < 0 ? 1 : 0;
-  const speedFactor = speed > 700 ? 3 : speed > 500 ? 2 : speed > 400 ? 1 : 0;
-  const densityFactor = density > 20 ? 2 : density > 10 ? 1 : 0;
-  const xrayFactor = xrayFlux >= 1e-4 ? 4 : xrayFlux >= 1e-5 ? 2 : xrayFlux >= 1e-6 ? 1 : 0;
-  const btFactor = bt > 20 ? 2 : bt > 10 ? 1 : 0;
-  const dstFactor = dst < -100 ? 3 : dst < -50 ? 2 : dst < -30 ? 1 : 0;
-
-  const rawScore = kp * 0.35 + bzFactor * 0.8 + speedFactor * 0.7 +
-    densityFactor * 0.4 + xrayFactor * 0.5 + btFactor * 0.3 + dstFactor * 0.6;
-
-  const kp1h = Math.min(9, Math.max(0, rawScore * 0.95 + (Math.random() * 0.3 - 0.15)));
-  const kp3h = Math.min(9, Math.max(0, rawScore * 1.05 + (Math.random() * 0.4 - 0.2)));
-  const kp6h = Math.min(9, Math.max(0, rawScore * 0.85 + (Math.random() * 0.5 - 0.25)));
-
-  const stormProb1h = Math.min(100, Math.max(0, (rawScore / 9) * 100 * (bz < -5 ? 1.4 : 1.0)));
-  const stormProb24h = Math.min(100, Math.max(0, stormProb1h * 1.2 + xrayFactor * 5));
-  const riskScore = Math.min(100, Math.max(0,
-    (kp / 9) * 30 + bzFactor * 8 + speedFactor * 7 + xrayFactor * 10 + dstFactor * 8 + densityFactor * 5
-  ));
-
-  const riskLevel = riskScore >= 70 ? "EXTREME" : riskScore >= 50 ? "HIGH" : riskScore >= 25 ? "MODERATE" : "LOW";
-  const anomaly = (speed > 600 && bz < -8) || xrayFlux >= 1e-4 || (density > 25 && speed > 500);
-
+  // ── 1. Historical trend via linear regression ─────────────────────────────
+  let kpVelocity = 0; // Kp change per 5-min interval
   let trend: "RISING" | "STABLE" | "FALLING" = "STABLE";
-  if (lastKpValues.length >= 3) {
-    const recent = lastKpValues.slice(-3);
-    const delta = recent[recent.length - 1] - recent[0];
-    if (delta > 0.5) trend = "RISING";
-    else if (delta < -0.5) trend = "FALLING";
+  if (lastKpValues.length >= 4) {
+    const recent = lastKpValues.slice(-Math.min(12, lastKpValues.length));
+    const n = recent.length;
+    const meanX = (n - 1) / 2;
+    const meanY = recent.reduce((a, b) => a + b, 0) / n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) {
+      num += (i - meanX) * (recent[i] - meanY);
+      den += (i - meanX) ** 2;
+    }
+    kpVelocity = den > 0 ? num / den : 0;
+    if (kpVelocity > 0.08) trend = "RISING";
+    else if (kpVelocity < -0.08) trend = "FALLING";
   }
 
-  const confidence = Math.min(99, Math.max(70, 88 - riskScore * 0.1 + (lastKpValues.length * 0.5)));
+  // ── 2. Driver signal from solar wind physics ──────────────────────────────
+  // Southward Bz is the primary driver of geomagnetic activity (opens magnetosphere)
+  const bzDriver = bz < -3 ? Math.min(1, (-bz - 3) / 22) : 0;
+  // High solar wind speed amplifies geoeffectiveness of southward Bz (Kan-Lee formula proxy)
+  const speedAmplifier = Math.min(1, Math.max(0, (speed - 400) / 400));
+  // Density enhances pressure (can cause sudden commencement)
+  const densityDriver = density > 15 ? Math.min(1, (density - 15) / 35) : 0;
+  // X-ray flares cause SEP events which add to radiation environment and Kp proxy
+  const xrayDriver = xrayFlux >= 1e-5 ? Math.min(1, (Math.log10(xrayFlux) + 5) / 3) : 0;
+  // Combined solar wind geoeffectiveness (Newell coupling proxy)
+  const geoDriver = bzDriver * (0.55 + speedAmplifier * 0.45) + densityDriver * 0.15;
+
+  // ── 3. Kp forecasts (persistence + driver + trend extrapolation) ──────────
+  // 1h ahead: dominated by persistence + current drivers (solar wind transit ~15-45min)
+  const kp1hRaw = kp * 0.55
+    + geoDriver * 9 * 0.35          // geoeffective driving toward max Kp
+    + kpVelocity * 12 * 0.10;       // trend momentum (12 = 1h in 5-min steps)
+  // 3h ahead: driver signal grows, persistence weakens
+  const kp3hRaw = kp * 0.35
+    + geoDriver * 9 * 0.50
+    + kpVelocity * 36 * 0.10        // 3h extrapolation of trend
+    + xrayDriver * 1.5 * 0.05;      // X-ray induced enhancement (delayed)
+  // 6h ahead: mostly driven by solar wind conditions
+  const kp6hRaw = kp * 0.20
+    + geoDriver * 9 * 0.60
+    + kpVelocity * 72 * 0.10
+    + xrayDriver * 2 * 0.10;
+
+  const clampKp = (v: number) => Math.min(9, Math.max(0, v));
+  const kp1h = clampKp(kp1hRaw);
+  const kp3h = clampKp(kp3hRaw);
+  const kp6h = clampKp(kp6hRaw);
+
+  // ── 4. Storm probability ─────────────────────────────────────────────────
+  // G1 storm starts at Kp=5 → storm probability scales from Kp=3 to 9
+  const kp1hStormProb = Math.min(100, Math.max(0, ((kp1h - 3) / 6) * 100));
+  const kpMaxProb = Math.min(100, Math.max(0, ((Math.max(kp3h, kp6h) - 3) / 6) * 100));
+  const stormProb1h = Math.round(kp1hStormProb);
+  const stormProb24h = Math.round(Math.min(100, kpMaxProb * 1.1 + (xrayDriver * 20)));
+
+  // ── 5. Risk score (0–100, based on current conditions) ───────────────────
+  const riskScore = Math.round(Math.min(100, Math.max(0,
+    (kp / 9) * 40          // Kp is primary risk driver
+    + bzDriver * 25          // southward Bz amplifies
+    + speedAmplifier * 12   // high speed raises risk
+    + xrayDriver * 15        // X/M flares add risk
+    + (dst < -50 ? Math.min(1, (-dst - 50) / 150) * 8 : 0)  // Dst storm
+  )));
+
+  const riskLevel = riskScore >= 70 ? "EXTREME" : riskScore >= 50 ? "HIGH" : riskScore >= 25 ? "MODERATE" : "LOW";
+  const anomaly = bzDriver > 0.4 || xrayFlux >= 1e-4 || (density > 25 && speed > 500) || dst < -80;
+
+  // Confidence: higher when more history is available and conditions are stable
+  const confidence = Math.min(99, Math.max(65,
+    85 + (lastKpValues.length * 0.5) - (riskScore * 0.05) - (Math.abs(kpVelocity) * 10)
+  ));
+
   return { kp1h, kp3h, kp6h, stormProb1h, stormProb24h, riskScore, riskLevel, anomaly, confidence, trend, modelAccuracy: 91.4 };
 }
 
@@ -238,45 +286,69 @@ type RiskValues = {
   pipelines: number; internet: number; overallRisk: number;
 };
 
+// NOAA-calibrated non-linear risk function
+// Sources: NOAA Space Weather Scales (G/R/S), SWPC effects tables
 function calcRiskValues(kp: number, bz: number, speed: number, xrayFlux: number, dst: number): RiskValues {
-  // Normalize each parameter to 0–1 based on NOAA/SWPC physical scales
-  const kpN    = kp / 9;                                                     // Kp 0–9
-  const bzN    = Math.min(1, Math.abs(Math.min(bz, 0)) / 25);               // southward Bz only, up to -25 nT
-  const speedN = Math.min(1, Math.max(0, (speed - 300) / 500));              // 300–800 km/s
-  const xrayN  = Math.min(1, Math.max(0, (Math.log10(Math.max(xrayFlux, 1e-9)) + 8) / 4)); // B→X class log scale
-  const dstN   = Math.min(1, Math.abs(Math.min(dst, 0)) / 150);             // Dst 0 to -150 nT
+  // ── 1. NOAA G-scale (Geomagnetic) ─────────────────────────────────────────
+  // G0: Kp<5 (no storm), G1: Kp=5 (~15%), G3: Kp=7 (~55%), G5: Kp=9 (100%)
+  // Below Kp=3: essentially no infrastructure impact
+  const kpRisk = kp >= 3
+    ? Math.min(1, Math.pow((kp - 2) / 7, 1.7))   // 0% at Kp=2, 22% at Kp=5, 100% at Kp=9
+    : kp * 0.005;                                  // tiny background below Kp=3
+
+  // ── 2. Southward Bz (opens magnetosphere above −5 nT threshold) ───────────
+  // Significant below -5 nT, severe below -20 nT
+  const bzRisk = bz < -5
+    ? Math.min(1, Math.pow((-bz - 5) / 20, 1.4))  // 0% at -5, 14% at -10, 100% at -25
+    : 0;
+
+  // ── 3. Solar wind speed (elevated > 500 km/s) ─────────────────────────────
+  // Quiet: 300–450 km/s, Elevated: 500–700 km/s, Extreme: >800 km/s
+  const speedRisk = speed >= 500
+    ? Math.min(1, Math.pow((speed - 500) / 300, 1.8)) // 0% at 500, 20% at 600, 100% at 800
+    : Math.max(0, (speed - 350) / 150) * 0.04;        // ≤4% background below 500 km/s
+
+  // ── 4. NOAA R-scale (Radio blackouts) ─────────────────────────────────────
+  // Piecewise calibration against NOAA R-scale thresholds:
+  // A/B class (<1e-6): <2%, C class (1e-6–1e-5): 2–8%, M1 (1e-5): ~15%
+  // X1 (1e-4): ~55%, X10 (1e-3): ~85%, X20+ (2e-3): 100%
+  let xrayRisk: number;
+  if (xrayFlux >= 2e-3)      xrayRisk = 1.00;
+  else if (xrayFlux >= 1e-3) xrayRisk = 0.85 + ((xrayFlux - 1e-3) / 1e-3) * 0.15;
+  else if (xrayFlux >= 1e-4) xrayRisk = 0.55 + ((xrayFlux - 1e-4) / 9e-4) * 0.30;
+  else if (xrayFlux >= 1e-5) xrayRisk = 0.15 + ((xrayFlux - 1e-5) / 9e-5) * 0.40;
+  else if (xrayFlux >= 1e-6) xrayRisk = 0.02 + ((xrayFlux - 1e-6) / 9e-6) * 0.13;
+  else                       xrayRisk = Math.max(0, (Math.log10(Math.max(xrayFlux, 1e-9)) + 9) / 3) * 0.02;
+
+  // ── 5. Dst (geomagnetic storm ring current) ────────────────────────────────
+  // Quiet: > -20 nT, Moderate storm: -50 nT, Severe: -100 nT, Extreme: -250 nT
+  const dstRisk = dst < -20
+    ? Math.min(1, Math.pow((-dst - 20) / 180, 1.5))   // 0% at -20, 8% at -50, 30% at -100
+    : 0;
 
   const clamp = (v: number) => Math.round(Math.min(100, Math.max(0, v * 100)));
 
-  // Weights based on NOAA space weather effects reference:
-  // GPS/GNSS: ionospheric scintillation (Kp, Bz) + radio blackout (X-ray) + speed-driven TEC
-  const gpsGnss      = clamp(kpN * 0.40 + xrayN * 0.30 + bzN * 0.20 + speedN * 0.10);
-
-  // Satellite Ops: radiation (X-ray, speed/particle flux) + orbital drag (Kp) + charging (Bz)
-  const satelliteOps = clamp(xrayN * 0.35 + kpN * 0.35 + speedN * 0.20 + bzN * 0.10);
-
-  // Power Grid: GICs driven by dB/dt — best indicated by Dst and Kp; Bz modulates ring current
-  const powerGrid    = clamp(dstN * 0.45 + kpN * 0.35 + bzN * 0.15 + speedN * 0.05);
-
-  // HF Radio: D-layer absorption (X-ray) + polar cap absorption (Kp) + propagation changes (speed)
-  const hfRadio      = clamp(xrayN * 0.60 + kpN * 0.25 + speedN * 0.10 + bzN * 0.05);
-
-  // Aviation: polar radiation dose (X-ray, speed) + HF comm loss (X-ray) + GPS nav (Kp)
-  const aviation     = clamp(xrayN * 0.35 + speedN * 0.25 + kpN * 0.25 + bzN * 0.15);
-
-  // Human Health: radiation (X-ray, speed-driven SEPs), mainly astronauts/aircraft crew
-  const humanHealth  = clamp(xrayN * 0.45 + speedN * 0.30 + kpN * 0.20 + bzN * 0.05);
-
-  // Pipelines: GICs (same drivers as power grid: Dst, Kp), Bz secondary
-  const pipelines    = clamp(dstN * 0.50 + kpN * 0.35 + bzN * 0.10 + speedN * 0.05);
-
-  // Internet/Undersea cables: GICs (Dst dominant), also X-ray for sat links, speed for SEPs
-  const internet     = clamp(dstN * 0.35 + xrayN * 0.25 + kpN * 0.25 + speedN * 0.15);
-
-  // Overall: Kp and Bz are primary geomagnetic drivers; X-ray for solar effects; speed and Dst secondary
-  const overallRisk  = clamp(kpN * 0.30 + bzN * 0.25 + xrayN * 0.20 + speedN * 0.15 + dstN * 0.10);
-
-  return { gpsGnss, satelliteOps, powerGrid, hfRadio, aviation, humanHealth, pipelines, internet, overallRisk };
+  // Weights align with NOAA space weather effects documentation
+  return {
+    // GPS/GNSS: ionospheric scintillation (Kp dominant), radio blackout (X-ray), Bz secondary
+    gpsGnss:      clamp(kpRisk * 0.50 + xrayRisk * 0.30 + bzRisk * 0.15 + speedRisk * 0.05),
+    // Satellites: radiation/SEP (X-ray+speed), orbital drag (Kp), surface charging (Bz)
+    satelliteOps: clamp(xrayRisk * 0.35 + kpRisk * 0.35 + speedRisk * 0.20 + bzRisk * 0.10),
+    // Power grid: GICs from Dst ring current changes + Kp; Bz drives Dst
+    powerGrid:    clamp(dstRisk * 0.50 + kpRisk * 0.35 + bzRisk * 0.10 + speedRisk * 0.05),
+    // HF Radio: D-layer absorption from X-ray (#1 cause), polar cap absorption (Kp)
+    hfRadio:      clamp(xrayRisk * 0.65 + kpRisk * 0.25 + speedRisk * 0.06 + bzRisk * 0.04),
+    // Aviation: radiation dose (X-ray, speed SEPs), HF comm failure, GPS nav degradation
+    aviation:     clamp(xrayRisk * 0.35 + kpRisk * 0.30 + speedRisk * 0.20 + bzRisk * 0.15),
+    // Human health: radiation (X-ray primary for astronauts/aircrew, speed-driven SEPs)
+    humanHealth:  clamp(xrayRisk * 0.50 + speedRisk * 0.25 + kpRisk * 0.20 + bzRisk * 0.05),
+    // Pipelines: GIC (Dst-driven, same physics as power grid)
+    pipelines:    clamp(dstRisk * 0.55 + kpRisk * 0.35 + bzRisk * 0.07 + speedRisk * 0.03),
+    // Internet/undersea cables: GIC (Dst), satellite link disruption (X-ray), SEPs (speed)
+    internet:     clamp(dstRisk * 0.40 + xrayRisk * 0.25 + kpRisk * 0.25 + speedRisk * 0.10),
+    // Overall: Kp + Bz are primary geomagnetic drivers; X-ray for radio/radiation; Dst for GIC
+    overallRisk:  clamp(kpRisk * 0.35 + bzRisk * 0.25 + xrayRisk * 0.20 + speedRisk * 0.12 + dstRisk * 0.08),
+  };
 }
 
 // ─── Routes ────────────────────────────────────────────────────────────────
