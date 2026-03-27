@@ -141,10 +141,22 @@ components:
           description: Solar flux index F10.7
         protonFlux:
           type: number
-          description: Proton flux >10 MeV
+          description: Proton flux >10 MeV (legacy alias)
+        protonFlux10MeV:
+          type: number
+          description: Real GOES proton flux >=10 MeV in pfu (NOAA S-scale driver)
         electronFlux:
           type: number
           description: Electron flux >2 MeV
+        sScale:
+          type: number
+          description: NOAA S-scale Solar Radiation Storm level (0-5)
+        sScaleLabel:
+          type: string
+          description: NOAA S-scale label (S0-S5)
+        sScaleDescription:
+          type: string
+          description: Human-readable description of S-scale level in Turkish
         systemStatus:
           type: string
           enum: [LIVE, DEGRADED, OFFLINE]
@@ -159,7 +171,11 @@ components:
         - sunspotNumber
         - solarFluxIndex
         - protonFlux
+        - protonFlux10MeV
         - electronFlux
+        - sScale
+        - sScaleLabel
+        - sScaleDescription
         - systemStatus
 
     SolarWindData:
@@ -271,6 +287,14 @@ components:
         modelAccuracy:
           type: number
           description: Historical model accuracy percentage
+        kpForecast:
+          type: array
+          items:
+            $ref: "#/components/schemas/KpForecastPoint"
+          description: NOAA official 3-day Kp forecast data points
+        noaaForecastAvailable:
+          type: boolean
+          description: Whether the NOAA official forecast was successfully fetched
       required:
         - kpPredicted1h
         - kpPredicted3h
@@ -284,6 +308,8 @@ components:
         - aiInsight
         - trend
         - modelAccuracy
+        - kpForecast
+        - noaaForecastAvailable
 
     AlertsResponse:
       type: object
