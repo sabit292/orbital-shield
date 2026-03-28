@@ -330,13 +330,32 @@ function buildRoutes(kp: number, bz: number, xray: number) {
 // ── Physics Engine ────────────────────────────────────────────────────────────
 
 /**
- * F = V^1.5 · |Bz|^1.2 · n^0.3 · (1 + 0.5·|dBz/dt|)
- * Güneş-Yer enerji aktarım kuplaj fonksiyonu.
- * Sessiz koşullar ~10k–80k | Orta ~80k–400k | Güçlü >400k | Şiddetli >1M
+ * F_new = V^1.4 · |Bz|^1.5 · n^0.3 · (1 + 0.6·|dBz/dt|) · ln(1 + t_{Bz<0})
+ * Sessiz: F < 80k | Uyarı: 80k–400k | Tehlike: > 400k | Şiddetli: > 1M
  */
-function calcF(V: number, Bz: number, n: number, dBzdt: number): number {
-  const absBz = Math.max(Math.abs(Bz), 0.01);
-  return Math.pow(V, 1.5) * Math.pow(absBz, 1.2) * Math.pow(Math.max(n, 0.01), 0.3) * (1 + 0.5 * Math.abs(dBzdt));
+function calcF(V: number, Bz: number, n: number, dBzdt: number, tBzNeg: number): number {
+  const absBz  = Math.max(Math.abs(Bz), 0.01);
+  const logTBz = Math.log(1 + Math.max(tBzNeg, 0.05));   // tBzNeg in hours
+  return Math.pow(V, 1.4) * Math.pow(absBz, 1.5) * Math.pow(Math.max(n, 0.01), 0.3)
+       * (1 + 0.6 * Math.abs(dBzdt)) * logTBz;
+}
+
+/** F_shock = F_new · (1 + 0.4·dPd/dt)  [shock-sensitive variant] */
+function calcFShock(F_new: number, dPddt: number): number {
+  return F_new * (1 + 0.4 * Math.max(dPddt, 0));
+}
+
+/** F_advanced = F_new · (1 + 0.3·|d²Bz/dt²|)  [second-derivative variant] */
+function calcFAdvanced(F_new: number, d2Bzdt2: number): number {
+  return F_new * (1 + 0.3 * Math.abs(d2Bzdt2));
+}
+
+/** F_CME = V^1.5 · |Bz|^1.4 · n^0.5 · Shock_P^0.8 · ln(1 + t_{Bz<0}) */
+function calcFCME(V: number, Bz: number, n: number, shockP: number, tBzNeg: number): number {
+  const absBz  = Math.max(Math.abs(Bz), 0.01);
+  const logTBz = Math.log(1 + Math.max(tBzNeg, 0.05));
+  return Math.pow(V, 1.5) * Math.pow(absBz, 1.4) * Math.pow(Math.max(n, 0.01), 0.5)
+       * Math.pow(Math.max(shockP, 0.01), 0.8) * logTBz;
 }
 
 /**
@@ -470,42 +489,77 @@ export default function AviationPage() {
   const dstIndex  = (current as any)?.dstIndex ?? 0;          // nT
   const protonFlux = (current as any)?.protonFlux ?? 5;       // pfu
 
-  // Track previous Bz for dBz/dt (rate of change)
-  const prevBzRef = useRef<number>(bz);
-  const dBzdt = bz - prevBzRef.current;
-  useEffect(() => { prevBzRef.current = bz; }, [bz]);
+  // Track previous Bz values for derivatives
+  const prevBzRef  = useRef<number>(bz);
+  const prevBz1Ref = useRef<number>(bz);  // bz two steps ago for d²Bz/dt²
+  const dBzdt   = bz - prevBzRef.current;       // 1st derivative (nT/5-min)
+  const d2Bzdt2 = bz - 2 * prevBzRef.current + prevBz1Ref.current; // 2nd deriv
+  useEffect(() => {
+    prevBz1Ref.current = prevBzRef.current;
+    prevBzRef.current  = bz;
+  }, [bz]);
 
-  // ── Physics Engine Calculations ──────────────────────────────────────────────
+  // Track t_{Bz<0}: accumulate hours Bz continuously negative
+  const tBzNegRef = useRef<number>(0);
+  useEffect(() => {
+    if (bz < 0) tBzNegRef.current += 5 / 60;   // 5-min polling = +0.083 h
+    else        tBzNegRef.current  = 0;
+  }, [bz]);
+  const tBzNeg = tBzNegRef.current;
+
+  // Track previous speed for dPd/dt
+  const prevSpeedRef = useRef<number>(speed);
+  const dPddt = (() => {
+    const Pd_now = 1.67e-6 * density * speed * speed;
+    const Pd_prv = 1.67e-6 * 5 * prevSpeedRef.current * prevSpeedRef.current;
+    return (Pd_now - Pd_prv) / (5 / 60); // rate per hour
+  })();
+  useEffect(() => { prevSpeedRef.current = speed; }, [speed]);
+
+  // ── Physics Engine Calculations — 4 F variants ───────────────────────────────
   const physics = useMemo(() => {
-    // F = V^1.5 · |Bz|^1.2 · n^0.3 · (1 + 0.5·|dBz/dt|)
-    const F = calcF(speed, bz, density, dBzdt);
+    // Shared
+    const Pd    = 1.67e-6 * density * speed * speed;   // nPa
+    const Fluxp = Math.max(protonFlux, 0);              // pfu (real NOAA)
+    const Dst   = dstIndex;                              // nT  (real NOAA)
 
-    // GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)
-    const gpsR = calcGPSrisk(bz, speed, kp);
+    // Shock_P: approximate from dPddt ratio (>1 means pressure rising)
+    const shockP = Math.max(1 + dPddt / 10, 0.01);    // normalised
+
+    // F variants
+    const F_new      = calcF(speed, bz, density, dBzdt, tBzNeg);
+    const F_shock    = calcFShock(F_new, dPddt);
+    const F_advanced = calcFAdvanced(F_new, d2Bzdt2);
+    const F_CME      = calcFCME(speed, bz, density, shockP, tBzNeg);
+
+    // Active F selection
+    const isCMELike   = shockP > 2 && Fluxp > 5;
+    const isShockLike = dPddt  > 2;
+    const F       = isCMELike ? F_CME : isShockLike ? F_shock : F_new;
+    const fLabel  = isCMELike ? "F_CME" : isShockLike ? "F_şok" : "F_new";
+
+    // F log-scale normalisation
+    const fNorm = Math.min(1, Math.log10(Math.max(F, 1)) / Math.log10(2_000_000));
+
+    // GPS risk
+    const gpsR     = calcGPSrisk(bz, speed, kp);
     const gpsTerm1 = 0.5 * (Math.abs(bz) / 20);
     const gpsTerm2 = 0.3 * (speed / 1000);
     const gpsTerm3 = 0.2 * (kp / 9);
 
-    // SATrisk = 0.4·(Pd/50) + 0.4·(Fluxp/1000) + 0.2·(|Dst|/200)
-    // Use REAL Dst and protonFlux from NOAA API; Pd computed from density & speed
-    const Pd      = 1.67e-6 * density * speed * speed;            // nPa
-    const Fluxp   = Math.max(protonFlux, 0);                      // pfu — real API value
-    const Dst     = dstIndex;                                      // nT  — real API value
-    const satR    = 0.4 * (Pd / 50) + 0.4 * (Fluxp / 1000) + 0.2 * (Math.abs(Dst) / 200);
+    // SAT risk — real Dst & Fluxp
+    const satR     = 0.4 * (Pd / 50) + 0.4 * (Fluxp / 1000) + 0.2 * (Math.abs(Dst) / 200);
     const satTerm1 = 0.4 * (Pd / 50);
     const satTerm2 = 0.4 * (Fluxp / 1000);
     const satTerm3 = 0.2 * (Math.abs(Dst) / 200);
 
-    // F normalization (log scale: quiet ~10k → 0.25, extreme ~2M → 1.0)
-    const fNorm = Math.min(1, Math.log10(Math.max(F, 1)) / Math.log10(2_000_000));
-
     return {
-      F, fNorm,
+      F, F_new, F_shock, F_advanced, F_CME, fLabel, fNorm,
       gpsR, gpsTerm1, gpsTerm2, gpsTerm3,
       satR, satTerm1, satTerm2, satTerm3,
-      Pd, Fluxp, Dst,
+      Pd, Fluxp, Dst, dPddt, d2Bzdt2, tBzNeg, shockP,
     };
-  }, [bz, speed, density, kp, dBzdt, dstIndex, protonFlux]);
+  }, [bz, speed, density, kp, dBzdt, d2Bzdt2, tBzNeg, dPddt, dstIndex, protonFlux]);
 
   // Metric levels — GPS now driven by physics formula
   const hfLevel:    StatusLevel = kpToLevel(kp, [3, 5, 7]);
@@ -655,19 +709,26 @@ export default function AviationPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-            {/* F coupling function */}
+            {/* F coupling function — active variant */}
             <PhysicsCard
               icon={<Zap className="w-4 h-4" />}
-              label="Kuplaj Fonksiyonu (F)"
-              formulaLabel="F = V¹·⁵ · |Bz|¹·² · n⁰·³ · (1 + 0.5|dBz/dt|)"
+              label={`Kuplaj Fonksiyonu (${physics.fLabel})`}
+              formulaLabel={
+                physics.fLabel === "F_CME"
+                  ? "F_CME = V¹·⁵·|Bz|¹·⁴·n⁰·⁵·ShockP⁰·⁸·ln(1+t)"
+                  : physics.fLabel === "F_şok"
+                  ? "F_şok = F_new·(1 + 0.4·dPd/dt)"
+                  : "F_new = V¹·⁴·|Bz|¹·⁵·n⁰·³·(1+0.6|dBz/dt|)·ln(1+t)"
+              }
               value={fmtF(physics.F)}
               pct={physics.fNorm}
               level={fLevel(physics.F)}
               terms={[
-                { label: `V¹·⁵  (${speed} km/s)`,      value: Math.pow(speed, 1.5).toFixed(0),      pct: Math.min(1, speed / 800) },
-                { label: `|Bz|¹·² (${Math.abs(bz).toFixed(1)} nT)`, value: Math.pow(Math.max(Math.abs(bz),0.01),1.2).toFixed(2), pct: Math.min(1, Math.abs(bz) / 20) },
+                { label: `V¹·⁴  (${speed} km/s)`,        value: Math.pow(speed, 1.4).toFixed(0),      pct: Math.min(1, speed / 800) },
+                { label: `|Bz|¹·⁵ (${Math.abs(bz).toFixed(1)} nT)`, value: Math.pow(Math.max(Math.abs(bz),0.01),1.5).toFixed(2), pct: Math.min(1, Math.abs(bz) / 20) },
                 { label: `n⁰·³  (${density.toFixed(1)} p/cm³)`, value: Math.pow(Math.max(density,0.01),0.3).toFixed(2), pct: Math.min(1, density / 30) },
-                { label: `dBz/dt (${dBzdt.toFixed(2)} nT/min)`, value: `×${(1 + 0.5 * Math.abs(dBzdt)).toFixed(2)}`, pct: Math.min(1, Math.abs(dBzdt) / 5) },
+                { label: `dBz/dt (${dBzdt.toFixed(2)} nT/5dk)`, value: `×${(1 + 0.6 * Math.abs(dBzdt)).toFixed(2)}`, pct: Math.min(1, Math.abs(dBzdt) / 5) },
+                { label: `ln(1+t_Bz<0)  t=${(physics.tBzNeg*60).toFixed(0)}dk`, value: Math.log(1+Math.max(physics.tBzNeg,0.05)).toFixed(3), pct: Math.min(1, physics.tBzNeg / 6) },
               ]}
             />
 

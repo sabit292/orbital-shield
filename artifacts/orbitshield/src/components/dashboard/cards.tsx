@@ -95,28 +95,86 @@ export function KpCard({ data, pred }: { data?: SpaceWeatherData; pred?: AIPredi
 // ── Physics engine (used by AI card) ─────────────────────────────────────────
 function physicsCalc(
   V: number, Bz: number, n: number, Kp: number,
-  Dst: number, Fluxp: number, dBzdt: number
+  Dst: number, Fluxp: number,
+  history?: HistoricalData
 ) {
-  // F = V^1.5 · |Bz|^1.2 · n^0.3 · (1 + 0.5·|dBz/dt|)
-  const F = Math.pow(V, 1.5) * Math.pow(Math.max(Math.abs(Bz), 0.01), 1.2)
-          * Math.pow(Math.max(n, 0.01), 0.3) * (1 + 0.5 * Math.abs(dBzdt));
+  const bzHist    = history?.bzHistory    ?? [];
+  const speedHist = history?.speedHistory ?? [];
 
+  // ── History-derived inputs ─────────────────────────────────────────────────
+  // dBz/dt: 1-step backward difference (nT / 5-min)
+  const bz1    = bzHist.length >= 2 ? bzHist[bzHist.length - 2].value : Bz;
+  const bz2    = bzHist.length >= 3 ? bzHist[bzHist.length - 3].value : bz1;
+  const dBzdt  = Bz - bz1;                          // nT / 5-min
+  const d2Bzdt2 = Bz - 2 * bz1 + bz2;              // nT / (5-min)² — second deriv
+
+  // t_{Bz<0}: hours Bz has been continuously southward (from recent bzHistory)
+  let tBzNeg = 0;
+  for (let i = bzHist.length - 1; i >= 0; i--) {
+    if (bzHist[i].value < 0) tBzNeg += 5 / 60;     // each point = 5 min
+    else break;
+  }
+  if (Bz < 0) tBzNeg = Math.max(tBzNeg, 5 / 60);  // at minimum current point
+
+  // dPd/dt: pressure rate of change over last 15 min (nPa / hour)
+  const speed15 = speedHist.length >= 3 ? speedHist[speedHist.length - 3].value : V;
+  const Pd_now  = 1.67e-6 * n * V * V;
+  const Pd_15   = 1.67e-6 * 5 * speed15 * speed15; // density baseline 5 p/cm³
+  const dPddt   = (Pd_now - Pd_15) / 0.25;          // nPa/hour
+
+  // Shock_P: dynamic pressure ratio vs 1h ago (for F_CME)
+  const speed1h = speedHist.length >= 12 ? speedHist[speedHist.length - 12].value : V;
+  const Pd_1h   = 1.67e-6 * 5 * speed1h * speed1h;
+  const shockP  = Pd_now / Math.max(Pd_1h, 0.1);
+
+  // Shared terms
+  const absBz   = Math.max(Math.abs(Bz), 0.01);
+  const safeN   = Math.max(n, 0.01);
+  // ln(1 + t) term — add floor to avoid zero when Bz just turned south
+  const logTBz  = Math.log(1 + Math.max(tBzNeg, 0.05));
+
+  // ── F variants ─────────────────────────────────────────────────────────────
+  // F_new = V^1.4 · |Bz|^1.5 · n^0.3 · (1 + 0.6·|dBz/dt|) · ln(1 + t_{Bz<0})
+  const F_new = Math.pow(V, 1.4) * Math.pow(absBz, 1.5) * Math.pow(safeN, 0.3)
+              * (1 + 0.6 * Math.abs(dBzdt)) * logTBz;
+
+  // F_shock = F_new · (1 + 0.4·dPd/dt)   [shock-sensitive, when Pd rising]
+  const F_shock = F_new * (1 + 0.4 * Math.max(dPddt, 0));
+
+  // F_advanced = F_new · (1 + 0.3·|d²Bz/dt²|)   [includes second derivative]
+  const F_advanced = F_new * (1 + 0.3 * Math.abs(d2Bzdt2));
+
+  // F_CME = V^1.5 · |Bz|^1.4 · n^0.5 · Shock_P^0.8 · ln(1 + t_{Bz<0})
+  const F_CME = Math.pow(V, 1.5) * Math.pow(absBz, 1.4) * Math.pow(safeN, 0.5)
+              * Math.pow(Math.max(shockP, 0.01), 0.8) * logTBz;
+
+  // ── Active F selection based on conditions ─────────────────────────────────
+  const isCMELike   = shockP > 2.0 && Fluxp > 5;
+  const isShockLike = dPddt  > 2.0;   // Pd rising >2 nPa/hour
+  const F       = isCMELike ? F_CME : isShockLike ? F_shock : F_new;
+  const fLabel  = isCMELike ? "F_CME" : isShockLike ? "F_şok" : "F_new";
+
+  // ── Risk scores ────────────────────────────────────────────────────────────
   // GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)
-  const gpsR = 0.5 * (Math.abs(Bz) / 20) + 0.3 * (V / 1000) + 0.2 * (Kp / 9);
+  const gpsR = 0.5 * (absBz / 20) + 0.3 * (V / 1000) + 0.2 * (Kp / 9);
 
   // SATrisk = 0.4·(Pd/50) + 0.4·(Fluxp/1000) + 0.2·(|Dst|/200)
-  // Pd (nPa) = 1.67e-6 · n · V²
-  const Pd  = 1.67e-6 * n * V * V;
+  const Pd   = Pd_now;
   const satR = 0.4 * (Pd / 50) + 0.4 * (Math.max(Fluxp, 0) / 1000) + 0.2 * (Math.abs(Dst) / 200);
 
-  const fmtF = (f: number) =>
+  const fmt  = (f: number) =>
     f >= 1e6 ? (f / 1e6).toFixed(2) + "M" : f >= 1e3 ? (f / 1e3).toFixed(1) + "k" : f.toFixed(0);
 
   const fLvl = F < 80_000 ? "success" : F < 400_000 ? "warning" : "danger";
   const gLvl = gpsR < 0.25 ? "success" : gpsR < 0.50 ? "warning" : "danger";
   const sLvl = satR < 0.25 ? "success" : satR < 0.50 ? "warning" : "danger";
 
-  return { F, fmtF: fmtF(F), gpsR, satR, Pd, fLvl, gLvl, sLvl };
+  return {
+    F, F_new, F_shock, F_advanced, F_CME,
+    fmtF: fmt(F), fLabel,
+    gpsR, satR, Pd, fLvl, gLvl, sLvl,
+    dBzdt, d2Bzdt2, tBzNeg, dPddt, shockP,
+  };
 }
 
 // ── Storm type classifier ─────────────────────────────────────────────────────
@@ -429,15 +487,15 @@ export function AiInsightCard({
     ? "text-warning border-warning/30 bg-warning/10"
     : "text-danger border-danger/30 bg-danger/10";
 
-  // Physics calculations from real NOAA data
+  // Physics calculations — all 4 F variants from history + real NOAA data
   const phy = data ? physicsCalc(
     data.solarWind.speed,
     data.magneticField.bz,
     data.solarWind.density,
     data.kpIndex,
-    (data as any).dstIndex ?? 0,
+    (data as any).dstIndex  ?? 0,
     (data as any).protonFlux ?? 5,
-    0   // dBzdt — single snapshot, 0 default
+    history
   ) : null;
 
   // Dynamic reasons from physics + real history
@@ -535,32 +593,66 @@ export function AiInsightCard({
           </div>
         </div>
 
-        {/* Physics Engine block */}
+        {/* Physics Engine block — 4 F variants */}
         {phy && (
           <div className="bg-black/40 border border-accent/20 rounded p-2 space-y-1.5">
+            {/* Header row */}
             <div className="flex items-center justify-between mb-1">
               <span className="text-[9px] font-display text-accent/80 uppercase tracking-widest">Fizik Motoru</span>
-              <span className={cn("text-[9px] font-mono font-bold",
-                phy.fLvl === "danger" ? "text-danger" : phy.fLvl === "warning" ? "text-warning" : "text-success"
-              )}>F={phy.fmtF}</span>
-            </div>
-            {/* F formula row */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] font-mono text-muted-foreground w-[72px] shrink-0">F (kuplaj)</span>
-              <div className="flex-1 h-1 bg-white/8 rounded-full overflow-hidden">
-                <div className={cn("h-full rounded-full",
-                  phy.fLvl === "danger" ? "bg-danger" : phy.fLvl === "warning" ? "bg-warning" : "bg-success"
-                )} style={{ width: `${Math.min(100, Math.log10(Math.max(phy.F, 1)) / Math.log10(2e6) * 100)}%` }} />
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] font-mono text-accent/60 border border-accent/30 rounded px-1">
+                  {phy.fLabel}
+                </span>
+                <span className={cn("text-[9px] font-mono font-bold",
+                  phy.fLvl === "danger" ? "text-danger" : phy.fLvl === "warning" ? "text-warning" : "text-success"
+                )}>{phy.fmtF}</span>
               </div>
-              <span className={cn("text-[9px] font-mono w-8 text-right shrink-0",
-                phy.fLvl === "danger" ? "text-danger" : phy.fLvl === "warning" ? "text-warning" : "text-success"
-              )}>{phy.fmtF}</span>
             </div>
-            {/* GPS risk */}
-            <PhysiBar label="GPSrisk" pct={phy.gpsR} lvl={phy.gLvl} />
-            {/* SAT risk */}
-            <PhysiBar label="SATrisk" pct={phy.satR} lvl={phy.sLvl} />
-            <div className="text-[8px] font-mono text-muted-foreground/50 pt-0.5 leading-relaxed">
+
+            {/* 4 F variants mini-table */}
+            {[
+              { label: "F_new",      v: phy.F_new,      note: "temel" },
+              { label: "F_şok",      v: phy.F_shock,    note: `Pd×${phy.dPddt > 0 ? "+" : ""}${phy.dPddt.toFixed(1)} nPa/h` },
+              { label: "F_adv",      v: phy.F_advanced, note: `d²Bz=${phy.d2Bzdt2.toFixed(1)}` },
+              { label: "F_CME",      v: phy.F_CME,      note: `Şok×${phy.shockP.toFixed(1)}` },
+            ].map(({ label, v, note }) => {
+              const fmtV = v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"k" : v.toFixed(0);
+              const logPct = Math.min(100, Math.log10(Math.max(v, 1)) / Math.log10(2e6) * 100);
+              const active = label === phy.fLabel || (label === "F_new" && phy.fLabel === "F_new");
+              const lvlColor = v < 80_000 ? "bg-success" : v < 400_000 ? "bg-warning" : "bg-danger";
+              const txtColor = v < 80_000 ? "text-success" : v < 400_000 ? "text-warning" : "text-danger";
+              return (
+                <div key={label} className={cn(
+                  "flex items-center gap-1.5 rounded px-1",
+                  active ? "bg-accent/8 outline outline-[0.5px] outline-accent/30" : ""
+                )}>
+                  <span className={cn("text-[8px] font-mono w-[38px] shrink-0", active ? "text-accent" : "text-muted-foreground/60")}>
+                    {label}
+                  </span>
+                  <div className="flex-1 h-[3px] bg-white/8 rounded-full overflow-hidden">
+                    <div className={cn("h-full rounded-full", lvlColor)} style={{ width: `${logPct}%` }} />
+                  </div>
+                  <span className={cn("text-[8px] font-mono w-8 text-right shrink-0", active ? txtColor : "text-muted-foreground/50")}>
+                    {fmtV}
+                  </span>
+                  <span className="text-[7px] font-mono text-muted-foreground/40 w-[60px] text-right shrink-0 truncate">{note}</span>
+                </div>
+              );
+            })}
+
+            {/* t_{Bz<0} info line */}
+            <div className="text-[7px] font-mono text-muted-foreground/50 pt-0.5">
+              t_Bz&lt;0={phy.tBzNeg < 1 ? `${(phy.tBzNeg*60).toFixed(0)}dk` : `${phy.tBzNeg.toFixed(1)}s`}
+              {" · "}dBz={phy.dBzdt.toFixed(1)} nT/5dk
+              {" · "}ln(t)={Math.log(1+Math.max(phy.tBzNeg,0.05)).toFixed(2)}
+            </div>
+
+            {/* GPS / SAT risk */}
+            <div className="border-t border-white/5 pt-1 space-y-1">
+              <PhysiBar label="GPSrisk" pct={phy.gpsR} lvl={phy.gLvl} />
+              <PhysiBar label="SATrisk" pct={phy.satR} lvl={phy.sLvl} />
+            </div>
+            <div className="text-[7px] font-mono text-muted-foreground/40 leading-relaxed">
               GPS=0.5·|Bz|/20+0.3·V/1k+0.2·Kp/9 · SAT=0.4·Pd/50+0.4·Fp/1k+0.2·|Dst|/200
             </div>
           </div>
