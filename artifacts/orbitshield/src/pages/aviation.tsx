@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from "react";
+import React, { useMemo, useEffect, useState, useRef } from "react";
 import { useLocation } from "wouter";
 import {
   useGetCurrentSpaceWeather,
@@ -10,7 +10,7 @@ import {
   Plane, Radio, Navigation, Zap, ShieldAlert,
   TrendingUp, TrendingDown, Minus, ArrowLeft,
   CheckCircle2, AlertTriangle, XCircle, Clock,
-  Bell, BellRing
+  Bell, BellRing, Calculator, Satellite
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -327,6 +327,122 @@ function buildRoutes(kp: number, bz: number, xray: number) {
   ];
 }
 
+// ── Physics Engine ────────────────────────────────────────────────────────────
+
+/**
+ * F = V^1.5 · |Bz|^1.2 · n^0.3 · (1 + 0.5·|dBz/dt|)
+ * Güneş-Yer enerji aktarım kuplaj fonksiyonu.
+ * Sessiz koşullar ~10k–80k | Orta ~80k–400k | Güçlü >400k | Şiddetli >1M
+ */
+function calcF(V: number, Bz: number, n: number, dBzdt: number): number {
+  const absBz = Math.max(Math.abs(Bz), 0.01);
+  return Math.pow(V, 1.5) * Math.pow(absBz, 1.2) * Math.pow(Math.max(n, 0.01), 0.3) * (1 + 0.5 * Math.abs(dBzdt));
+}
+
+/**
+ * GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)
+ * 0–1 normalize edilmiş. >0.5 = uyarı, >0.75 = kritik.
+ */
+function calcGPSrisk(Bz: number, V: number, Kp: number): number {
+  return 0.5 * (Math.abs(Bz) / 20) + 0.3 * (V / 1000) + 0.2 * (Kp / 9);
+}
+
+/**
+ * SATrisk = 0.4·(Pd/50) + 0.4·(Fluxp/1000) + 0.2·(|Dst|/200)
+ * Pd: dinamik basınç (nPa) = 1.67e-6·n·V²
+ * Fluxp: proton akısı tahmini (Kp bazlı, pfu)
+ * Dst: jeomagnetik fırtına indeksi tahmini (nT, Kp bazlı)
+ */
+function calcSATrisk(n: number, V: number, Kp: number): { sat: number; Pd: number; Fluxp: number; Dst: number } {
+  const Pd    = 1.67e-6 * n * V * V;                          // nPa
+  const Fluxp = Kp > 5 ? (Kp - 5) * 250 : Kp > 3 ? (Kp - 3) * 20 : 5; // pfu (crude proxy)
+  const Dst   = -(7.26 * Kp + 0.05 * Kp * Kp);              // nT estimate
+  const sat   = 0.4 * (Pd / 50) + 0.4 * (Fluxp / 1000) + 0.2 * (Math.abs(Dst) / 200);
+  return { sat, Pd, Fluxp, Dst };
+}
+
+function fLevel(F: number): StatusLevel {
+  if (F < 80_000)  return "normal";
+  if (F < 400_000) return "caution";
+  if (F < 1_000_000) return "warning";
+  return "critical";
+}
+
+function riskLevel(r: number): StatusLevel {
+  if (r < 0.25) return "normal";
+  if (r < 0.50) return "caution";
+  if (r < 0.75) return "warning";
+  return "critical";
+}
+
+function fmtF(F: number): string {
+  if (F >= 1_000_000) return (F / 1_000_000).toFixed(2) + "M";
+  if (F >= 1_000)     return (F / 1_000).toFixed(1) + "k";
+  return F.toFixed(0);
+}
+
+// Gauge bar for formula terms
+function TermBar({ label, value, pct, color }: { label: string; value: string; pct: number; color: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex justify-between items-center">
+        <span className="text-[10px] text-slate-500 font-mono">{label}</span>
+        <span className="text-[10px] text-slate-300 font-mono font-bold">{value}</span>
+      </div>
+      <div className="w-full h-1 bg-slate-700/60 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, pct * 100)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+interface PhysicsRowProps {
+  icon: React.ReactNode;
+  label: string;
+  formulaLabel: string;
+  value: string;
+  pct: number;          // 0–1 for the big gauge
+  level: StatusLevel;
+  terms: Array<{ label: string; value: string; pct: number }>;
+}
+
+function PhysicsCard({ icon, label, formulaLabel, value, pct, level, terms }: PhysicsRowProps) {
+  const c = statusColor(level);
+  const barColor = level === "critical" ? "bg-red-500" : level === "warning" ? "bg-orange-500" : level === "caution" ? "bg-amber-500" : "bg-emerald-500";
+  return (
+    <div className={`rounded-xl border ${c.border} bg-[#0c1e35] p-4 flex flex-col gap-3`}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-slate-400">{icon}</span>
+          <div>
+            <div className="text-[10px] font-bold text-slate-300 uppercase tracking-widest leading-none">{label}</div>
+            <div className="text-[9px] text-slate-600 font-mono mt-0.5">{formulaLabel}</div>
+          </div>
+        </div>
+        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${c.bg} ${c.text} border ${c.border}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+          {levelLabel(level)}
+        </div>
+      </div>
+      {/* Big value */}
+      <div className="flex items-end gap-2">
+        <span className={`text-2xl font-bold tracking-tight ${c.text}`}>{value}</span>
+      </div>
+      {/* Master progress bar */}
+      <div className="w-full h-1.5 bg-slate-700/60 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(100, pct * 100)}%` }} />
+      </div>
+      {/* Term breakdown */}
+      <div className="flex flex-col gap-1.5 pt-1 border-t border-slate-700/40">
+        {terms.map(t => (
+          <TermBar key={t.label} label={t.label} value={t.value} pct={t.pct} color={barColor} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AviationPage() {
@@ -347,12 +463,47 @@ export default function AviationPage() {
   const kp     = current?.kpIndex ?? 0;
   const bz     = current?.solarWind?.bz ?? 0;
   const speed  = current?.solarWind?.speed ?? 400;
+  const density = current?.solarWind?.density ?? 5;
   const xray   = current?.xrayFlux?.current ?? 0;
   const avRisk = risk?.aviation ?? 0;
 
-  // Metric levels derived from real NOAA data
+  // Track previous Bz for dBz/dt (rate of change)
+  const prevBzRef = useRef<number>(bz);
+  const dBzdt = bz - prevBzRef.current;
+  useEffect(() => { prevBzRef.current = bz; }, [bz]);
+
+  // ── Physics Engine Calculations ──────────────────────────────────────────────
+  const physics = useMemo(() => {
+    // F = V^1.5 · |Bz|^1.2 · n^0.3 · (1 + 0.5·|dBz/dt|)
+    const F = calcF(speed, bz, density, dBzdt);
+
+    // GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)
+    const gpsR = calcGPSrisk(bz, speed, kp);
+    const gpsTerm1 = 0.5 * (Math.abs(bz) / 20);
+    const gpsTerm2 = 0.3 * (speed / 1000);
+    const gpsTerm3 = 0.2 * (kp / 9);
+
+    // SATrisk = 0.4·(Pd/50) + 0.4·(Fluxp/1000) + 0.2·(|Dst|/200)
+    const { sat: satR, Pd, Fluxp, Dst } = calcSATrisk(density, speed, kp);
+    const satTerm1 = 0.4 * (Pd / 50);
+    const satTerm2 = 0.4 * (Fluxp / 1000);
+    const satTerm3 = 0.2 * (Math.abs(Dst) / 200);
+
+    // F normalization for gauge (quiet ~10k, extreme ~2M → log scale)
+    const fNorm = Math.min(1, Math.log10(Math.max(F, 1)) / Math.log10(2_000_000));
+
+    return {
+      F, fNorm,
+      gpsR, gpsTerm1, gpsTerm2, gpsTerm3,
+      satR, satTerm1, satTerm2, satTerm3,
+      Pd, Fluxp, Dst,
+    };
+  }, [bz, speed, density, kp, dBzdt]);
+
+  // Metric levels — GPS now driven by physics formula
   const hfLevel:    StatusLevel = kpToLevel(kp, [3, 5, 7]);
-  const gpsLevel:   StatusLevel = bz < -10 ? "warning" : bz < -5 ? "caution" : kpToLevel(kp, [4, 6, 8]);
+  const gpsLevel:   StatusLevel = riskLevel(physics.gpsR);
+  const satLevel:   StatusLevel = riskLevel(physics.satR);
   const radLevel:   StatusLevel = kpToLevel(kp, [4, 6, 8]);
   const polarLevel: StatusLevel = kp >= 7 ? "critical" : kp >= 5 ? "warning" : kp >= 3 ? "caution" : "normal";
 
@@ -409,16 +560,23 @@ export default function AviationPage() {
   // THY routes
   const routes = useMemo(() => buildRoutes(kp, bz, xray), [kp, bz, xray]);
 
-  // Chart data from real history
+  // Chart data — GPS/SAT risk from physics formulas, Kp from history
+  // (history only has kpIndex reliably; use current Bz/V for other terms)
   const chartData = useMemo(() => {
     if (!hist?.history?.length) return [];
-    return hist.history.slice(-24).map((h, i) => ({
-      label: `-${24 - i}s`,
-      hfRisk:  Math.min(100, Math.round((h.kpIndex ?? 0) * 14)),
-      gpsRisk: Math.min(100, Math.round(avRisk + (h.kpIndex ?? 0) * 3)),
-      kp:      h.kpIndex ?? 0,
-    }));
-  }, [hist, avRisk]);
+    return hist.history.slice(-24).map((h, i) => {
+      const hKp    = h.kpIndex ?? 0;
+      const gpsRaw = calcGPSrisk(bz, speed, hKp);
+      const { sat: satRaw } = calcSATrisk(density, speed, hKp);
+      return {
+        label:   `-${24 - i}s`,
+        hfRisk:  Math.min(100, Math.round(hKp * 14)),
+        gpsRisk: Math.min(100, Math.round(gpsRaw * 100)),
+        satRisk: Math.min(100, Math.round(satRaw * 100)),
+        kp:      hKp,
+      };
+    });
+  }, [hist, bz, speed, density]);
 
   const alarmCount = alarms.length;
 
@@ -478,6 +636,64 @@ export default function AviationPage() {
             <span className="text-[10px] text-slate-600">Kp {kp.toFixed(1)} · Bz {bz.toFixed(1)} nT · X-ışını: {current?.xrayFlux?.classLabel ?? "B"}</span>
           </div>
           <AlarmBanner alarms={alarms} />
+        </section>
+
+        {/* Physics Engine Panel */}
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <Calculator className="w-3.5 h-3.5 text-slate-400" />
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Fizik Tabanlı Risk Motoru</h2>
+            <div className="flex-1 h-px bg-slate-700/50" />
+            <span className="text-[10px] text-slate-600">NOAA girdileri · anlık hesaplama</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            {/* F coupling function */}
+            <PhysicsCard
+              icon={<Zap className="w-4 h-4" />}
+              label="Kuplaj Fonksiyonu (F)"
+              formulaLabel="F = V¹·⁵ · |Bz|¹·² · n⁰·³ · (1 + 0.5|dBz/dt|)"
+              value={fmtF(physics.F)}
+              pct={physics.fNorm}
+              level={fLevel(physics.F)}
+              terms={[
+                { label: `V¹·⁵  (${speed} km/s)`,      value: Math.pow(speed, 1.5).toFixed(0),      pct: Math.min(1, speed / 800) },
+                { label: `|Bz|¹·² (${Math.abs(bz).toFixed(1)} nT)`, value: Math.pow(Math.max(Math.abs(bz),0.01),1.2).toFixed(2), pct: Math.min(1, Math.abs(bz) / 20) },
+                { label: `n⁰·³  (${density.toFixed(1)} p/cm³)`, value: Math.pow(Math.max(density,0.01),0.3).toFixed(2), pct: Math.min(1, density / 30) },
+                { label: `dBz/dt (${dBzdt.toFixed(2)} nT/min)`, value: `×${(1 + 0.5 * Math.abs(dBzdt)).toFixed(2)}`, pct: Math.min(1, Math.abs(dBzdt) / 5) },
+              ]}
+            />
+
+            {/* GPS Risk */}
+            <PhysicsCard
+              icon={<Navigation className="w-4 h-4" />}
+              label="GPS/GNSS Risk Endeksi"
+              formulaLabel="GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)"
+              value={`%${(physics.gpsR * 100).toFixed(1)}`}
+              pct={physics.gpsR}
+              level={gpsLevel}
+              terms={[
+                { label: `0.5·(|Bz|/20)  |Bz|=${Math.abs(bz).toFixed(1)}nT`, value: physics.gpsTerm1.toFixed(3), pct: physics.gpsTerm1 / 0.5 },
+                { label: `0.3·(V/1000)   V=${speed}km/s`,                    value: physics.gpsTerm2.toFixed(3), pct: physics.gpsTerm2 / 0.3 },
+                { label: `0.2·(Kp/9)     Kp=${kp.toFixed(1)}`,               value: physics.gpsTerm3.toFixed(3), pct: physics.gpsTerm3 / 0.2 },
+              ]}
+            />
+
+            {/* SAT Risk */}
+            <PhysicsCard
+              icon={<Satellite className="w-4 h-4" />}
+              label="Uydu Operasyon Riski"
+              formulaLabel="SATrisk = 0.4·(Pd/50) + 0.4·(Fluxp/1000) + 0.2·(|Dst|/200)"
+              value={`%${(physics.satR * 100).toFixed(1)}`}
+              pct={physics.satR}
+              level={satLevel}
+              terms={[
+                { label: `0.4·(Pd/50)    Pd=${physics.Pd.toFixed(2)}nPa`,      value: physics.satTerm1.toFixed(3), pct: physics.satTerm1 / 0.4 },
+                { label: `0.4·(Fluxp/1k) Fp≈${physics.Fluxp.toFixed(0)}pfu`,   value: physics.satTerm2.toFixed(3), pct: physics.satTerm2 / 0.4 },
+                { label: `0.2·(|Dst|/200) Dst≈${physics.Dst.toFixed(0)}nT`,    value: physics.satTerm3.toFixed(3), pct: physics.satTerm3 / 0.2 },
+              ]}
+            />
+          </div>
         </section>
 
         {/* Metric Cards */}
@@ -621,8 +837,9 @@ export default function AviationPage() {
             </div>
             <div className="flex items-center gap-4 text-[10px] text-slate-500">
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-400 inline-block rounded" /> HF Risk %</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-amber-400 inline-block rounded" /> GPS Risk %</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-red-500 inline-block rounded opacity-60" style={{ borderTop: "2px dashed" }} /> Uyarı Eşiği (%70)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-amber-400 inline-block rounded" /> GPS Risk % (formül)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-violet-400 inline-block rounded" /> SAT Risk % (formül)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-red-500 inline-block rounded opacity-60" /> Uyarı (%50)</span>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={180}>
@@ -635,9 +852,10 @@ export default function AviationPage() {
                 labelStyle={{ color: "#94a3b8" }}
                 itemStyle={{ color: "#e2e8f0" }}
               />
-              <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="4 2" strokeWidth={1} label={{ value: "Uyarı", fill: "#ef4444", fontSize: 9, position: "insideTopRight" }} />
+              <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="4 2" strokeWidth={1} label={{ value: "Uyarı %50", fill: "#ef4444", fontSize: 9, position: "insideTopRight" }} />
               <Line type="monotone" dataKey="hfRisk"  stroke="#60a5fa" strokeWidth={2} dot={false} name="HF Risk %" />
-              <Line type="monotone" dataKey="gpsRisk" stroke="#fbbf24" strokeWidth={2} dot={false} name="GPS Risk %" />
+              <Line type="monotone" dataKey="gpsRisk" stroke="#fbbf24" strokeWidth={2} dot={false} name="GPS Risk % (formül)" />
+              <Line type="monotone" dataKey="satRisk" stroke="#a78bfa" strokeWidth={2} dot={false} name="SAT Risk % (formül)" />
             </LineChart>
           </ResponsiveContainer>
         </section>
