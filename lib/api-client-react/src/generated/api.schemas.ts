@@ -179,6 +179,19 @@ export interface InfrastructureRiskValues {
   overallRisk: number;
 }
 
+export interface InfrastructureRiskMeta {
+  /** Yerel jeomanyetik katsayı G = L × C × T */
+  G: number;
+  /** Yerel saat katsayısı T (0.9/1.0/1.2) */
+  T: number;
+  /** Elektrik şebekesi kırılganlık katsayısı A_grid */
+  A_grid: number;
+  /** Enlem katsayısı L */
+  L: number;
+  /** Zemin iletkenliği katsayısı C */
+  C: number;
+}
+
 export interface InfrastructureRisk {
   /** GPS/GNSS disruption risk (0-100) */
   gpsGnss: number;
@@ -202,6 +215,8 @@ export interface InfrastructureRisk {
   predicted3h: InfrastructureRiskValues;
   /** Overall risk trend */
   trend: InfrastructureRiskTrend;
+  /** Model meta parametreleri */
+  meta?: InfrastructureRiskMeta;
 }
 
 export interface KpDataPoint {

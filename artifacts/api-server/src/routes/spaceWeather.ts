@@ -323,20 +323,41 @@ type RiskValues = {
   pipelines: number; internet: number; overallRisk: number;
 };
 
-// Uzay Hava Şiddeti Skoru — S formülü (6 değişken, ağırlıklı):
-//   Normalize:
-//     Kp_n  = Kp / 9
-//     Dst_n = min(|Dst| / 500, 1)
-//     dBdt_n= min(dBdt / 1000, 1)
-//     V_n   = min(Vsw / 1000, 1)
-//     Bz_n  = min(max((-Bz) / 30, 0), 1)   ← güney Bz → enerji girişi
-//     P_n   = min(ProtonFlux / 100, 1)
-//   S = 0.18·Kp_n + 0.22·Dst_n + 0.30·dBdt_n + 0.12·V_n + 0.10·Bz_n + 0.08·P_n
-//   R_infra = 100 · S · L
-// L = bölgesel hassasiyet katsayısı (regional sensitivity factor)
+// ─── Altyapı Risk Modeli R = 100 × S × G × A ────────────────────────────────
+//
+// S = Uzay hava şiddeti skoru (6 parametreli ağırlıklı)
+// G = Yerel jeomanyetik katsayı  = L × C × T
+//     L: enlem katsayısı  (Türkiye = 0.8)
+//     C: zemin iletkenliği (normal şehir = 1.0)
+//     T: yerel saat katsayısı (gündüz 0.9 / akşam 1.0 / gece22-03 1.2)
+// A = Altyapı kırılganlık katsayısı (kategori bazlı)
+//     Elektrik şebekesi: A_grid = 0.4·H + 0.3·V + 0.3·Age
+//     Uydu: 0.9 | GPS/HF: 0.8 | Boru hattı: 0.7 | Demiryolu: 0.6
+
+// Türkiye yerel saatine göre T katsayısı (UTC+3)
+function turkeyT(utcHourOffset = 0): number {
+  const h = (new Date().getUTCHours() + 3 + utcHourOffset) % 24;
+  if (h >= 22 || h < 3) return 1.2;   // Gece 22:00–03:00 — en yüksek auroral etkinlik
+  if (h >= 18) return 1.0;             // Akşam
+  return 0.9;                          // Gündüz
+}
+
+// G = L × C × T  (Türkiye: L=0.8, C=1.0)
+function turkeyG(utcHourOffset = 0): number {
+  return parseFloat((0.8 * 1.0 * turkeyT(utcHourOffset)).toFixed(3));
+}
+
+// Türkiye YGK (Yüksek Gerilim Köprüsü) şebeke kırılganlığı:
+//   Hat: ~1500 km ana EYH omurga, 400 kV, 25 yıllık trafolar
+//   A_grid = 0.4·H + 0.3·(V/765) + 0.3·(Age/40)
+const TR_H   = 1.5;          // 1500 km / 1000
+const TR_V   = 400 / 765;    // 400 kV / 765 kV referans
+const TR_Age = 25 / 40;      // 25 yıl / 40 yıl
+const A_GRID = parseFloat((0.4 * TR_H + 0.3 * TR_V + 0.3 * TR_Age).toFixed(4)); // ≈ 0.9445
+
 function calcRiskValues(
   kp: number, bz: number, speed: number, _xrayFlux: number, dst: number,
-  protonFlux10: number = 0.1, dBdt: number = 0
+  protonFlux10: number = 0.1, dBdt: number = 0, G: number = 0.8
 ): RiskValues {
   // Sanitize all inputs — NaN or ±Infinity must never reach the formula
   const safeVal = (v: number, fallback: number) => (isFinite(v) ? v : fallback);
@@ -346,42 +367,57 @@ function calcRiskValues(
   dst          = safeVal(dst, -15);
   protonFlux10 = safeVal(protonFlux10, 0.1);
   dBdt         = safeVal(dBdt, 0);
+  G            = safeVal(G, 0.8);
 
-  // Normalize each term to 0–1
+  // ── 1. Normalize parametreler (0–1) ─────────────────────────────────────
   const Kp_n   = Math.min(1, Math.max(0, kp / 9));
   const Dst_n  = Math.min(1, Math.max(0, Math.abs(dst) / 500));
   const dBdt_n = Math.min(1, Math.max(0, Math.abs(dBdt) / 1000));
   const V_n    = Math.min(1, Math.max(0, speed / 1000));
-  const Bz_n   = Math.min(1, Math.max(0, (-bz) / 30));   // sadece güney Bz (negatif)
+  const Bz_n   = Math.min(1, Math.max(0, (-bz) / 30));   // Güney Bz → enerji girişi
   const P_n    = Math.min(1, Math.max(0, protonFlux10 / 100));
 
-  // Ağırlıklı uzay hava şiddeti skoru S (toplam ağırlık = 1.00)
+  // ── 2. Uzay hava şiddeti skoru S (Σ ağırlık = 1.00) ─────────────────────
   const S = 0.18 * Kp_n + 0.22 * Dst_n + 0.30 * dBdt_n + 0.12 * V_n + 0.10 * Bz_n + 0.08 * P_n;
 
-  // Genel skor (S × L) — diğer kategoriler için
-  const R = (L: number) => Math.round(Math.min(100, Math.max(0, 100 * S * L)));
+  // ── 3. Kategori-özel risk formülleri R = 100 × f(S,P_n,Kp_n,Bz_n) × G × A ─
+  const clamp = (v: number) => Math.round(Math.min(100, Math.max(0, v)));
 
-  // Kategori-özel formüller (G = 1.0 referans değeri):
-  // R_grid  = 100 × S × G × A_grid     (elektrik şebekesi, A_grid = 0.8)
-  // R_sat   = 100 × (0.5S + 0.5P_n) × G × 0.9   (uydu: S + proton flux)
-  // R_comm  = 100 × (0.4Kp_n + 0.3Bz_n + 0.3P_n) × G × 0.8  (GPS/HF/haberleşme)
-  const G = 1.0;
-  const R_grid_raw = 100 * S * G * 0.8;
-  // R_final = 100 / (1 + e^(-0.08·(R_grid - 50))) — lojistik sigmoid dönüşümü
-  const R_grid  = Math.round(100 / (1 + Math.exp(-0.08 * (R_grid_raw - 50))));
-  const R_sat   = Math.round(Math.min(100, Math.max(0, 100 * (0.5 * S + 0.5 * P_n) * G * 0.9)));
-  const R_comm  = Math.round(Math.min(100, Math.max(0, 100 * (0.4 * Kp_n + 0.3 * Bz_n + 0.3 * P_n) * G * 0.8)));
+  // Elektrik şebekesi: R_grid = 100 × S × G × A_grid → sigmoid dönüşümü
+  const R_grid_raw = 100 * S * G * A_GRID;
+  const R_grid = clamp(100 / (1 + Math.exp(-0.08 * (R_grid_raw - 50))));  // lojistik
+
+  // Uydu: R_sat = 100 × (0.5S + 0.5P_n) × G × A=0.9
+  const R_sat  = clamp(100 * (0.5 * S + 0.5 * P_n) * G * 0.9);
+
+  // GPS / Haberleşme: R_comm = 100 × (0.4Kp_n + 0.3Bz_n + 0.3P_n) × G × A=0.8
+  const R_comm = clamp(100 * (0.4 * Kp_n + 0.3 * Bz_n + 0.3 * P_n) * G * 0.8);
+
+  // Boru hattı: R = 100 × S × G × A=0.7
+  const R_pipe = clamp(100 * S * G * 0.7);
+
+  // Havacılık: R = 100 × S × G × A=0.9
+  const R_avia = clamp(100 * S * G * 0.9);
+
+  // İnsan sağlığı: R = 100 × S × G × A=0.8
+  const R_hlth = clamp(100 * S * G * 0.8);
+
+  // İnternet altyapısı: R = 100 × S × G × A=0.9
+  const R_net  = clamp(100 * S * G * 0.9);
+
+  // Genel referans: A=1.0
+  const R_all  = clamp(100 * S * G * 1.0);
 
   return {
-    gpsGnss:      R_comm,    // GPS/Haberleşme: 0.4Kp + 0.3Bz↓ + 0.3P — L=0.8
-    satelliteOps: R_sat,     // Uydu: 0.5S + 0.5P_n — L=0.9
-    powerGrid:    R_grid,    // Elektrik: S × A_grid=0.8
-    hfRadio:      R_comm,    // HF Radyo: GPS/Haberleşme formülü — L=0.8
-    aviation:     R(0.9),    // Havacılık: genel S — L=0.9
-    humanHealth:  R(0.8),    // İnsan Sağlığı: genel S — L=0.8
-    pipelines:    R(0.8),    // Boru Hatları: genel S — L=0.8
-    internet:     R(0.9),    // İnternet: genel S — L=0.9
-    overallRisk:  R(1.0),    // Genel Referans — L=1.0
+    gpsGnss:      R_comm,   // GPS/HF: 0.4Kp+0.3Bz↓+0.3P, A=0.8
+    satelliteOps: R_sat,    // Uydu: 0.5S+0.5P, A=0.9
+    powerGrid:    R_grid,   // Elektrik: S×G×A_grid + sigmoid
+    hfRadio:      R_comm,   // HF Radyo: GPS formülü, A=0.8
+    aviation:     R_avia,   // Havacılık: S×G, A=0.9
+    humanHealth:  R_hlth,   // İnsan Sağlığı: S×G, A=0.8
+    pipelines:    R_pipe,   // Boru Hatları: S×G, A=0.7
+    internet:     R_net,    // İnternet: S×G, A=0.9
+    overallRisk:  R_all,    // Genel: S×G, A=1.0
   };
 }
 
@@ -653,10 +689,16 @@ router.get("/infrastructure-risk", async (_req, res) => {
   const safeSpeed  = isFinite(speed) && speed > 0 ? speed : 450;
   const safeProton = isFinite(protonFlux10) && protonFlux10 > 0 ? protonFlux10 : 0.1;
 
-  // Current risk using S formülü (6-değişken ağırlıklı skor)
-  const current = calcRiskValues(safeKp, safeBz, safeSpeed, xrayFlux, safeDst, safeProton, dBdt);
+  // G = L × C × T hesapla (Türkiye, dinamik yerel saat)
+  const G_now = turkeyG(0);   // şimdiki saat
+  const G_1h  = turkeyG(1);   // 1 saat sonrası
+  const G_3h  = turkeyG(3);   // 3 saat sonrası
+  const T_now = turkeyT(0);
 
-  // AI-predicted risk for 1h and 3h using predicted Kp/conditions
+  // Current risk using full R = 100 × S × G × A model
+  const current = calcRiskValues(safeKp, safeBz, safeSpeed, xrayFlux, safeDst, safeProton, dBdt, G_now);
+
+  // AI-predicted risk for 1h and 3h using predicted Kp/conditions + future G
   const pred = aiPredict({ kp, bz, speed, density, temp, xrayFlux, bt, dst });
 
   // For predicted Bz, assume partial recovery if already low, or deepening if trend rising
@@ -670,7 +712,8 @@ router.get("/infrastructure-risk", async (_req, res) => {
     xrayFlux,
     safeDst * bzFactor1h,
     safeProton,
-    dBdt * bzFactor1h
+    dBdt * bzFactor1h,
+    G_1h
   );
   const predicted3h = calcRiskValues(
     pred.kp3h,
@@ -679,7 +722,8 @@ router.get("/infrastructure-risk", async (_req, res) => {
     xrayFlux,
     safeDst * (bzFactor1h * 0.9 + 0.1),
     safeProton,
-    dBdt * 0.7
+    dBdt * 0.7,
+    G_3h
   );
 
   // Determine trend
@@ -692,6 +736,7 @@ router.get("/infrastructure-risk", async (_req, res) => {
     predicted1h,
     predicted3h,
     trend: trendDir,
+    meta: { G: G_now, T: T_now, A_grid: A_GRID, L: 0.8, C: 1.0 },
   });
 });
 

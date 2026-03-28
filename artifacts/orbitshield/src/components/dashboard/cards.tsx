@@ -1161,21 +1161,35 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
         })}
       </div>
 
-      {/* Formül ve kaynak notu */}
-      <div className="mt-3 border-t border-white/5 pt-2 space-y-0.5">
-        <div className="text-[8.5px] font-mono text-muted-foreground/40 leading-relaxed">
-          S = 0.18·Kp + 0.22·|Dst| + 0.30·dBdt + 0.12·V + 0.10·Bz↓ + 0.08·P
+      {/* G = L × C × T meta gösterimi */}
+      {risk.meta && (
+        <div className="mt-3 border-t border-white/5 pt-2 grid grid-cols-3 gap-x-2">
+          {[
+            { label: "G", value: risk.meta.G.toFixed(3), hint: "L×C×T" },
+            { label: "T", value: risk.meta.T.toFixed(1),
+              hint: risk.meta.T === 1.2 ? "Gece" : risk.meta.T === 1.0 ? "Akşam" : "Gündüz" },
+            { label: "A_grid", value: risk.meta.A_grid.toFixed(3), hint: "Şebeke" },
+          ].map(({ label, value, hint }) => (
+            <div key={label} className="flex flex-col items-center bg-white/3 rounded p-1">
+              <span className="text-[8px] font-mono text-muted-foreground/50">{label}</span>
+              <span className="text-[10px] font-mono font-bold text-primary/80">{value}</span>
+              <span className="text-[7px] font-mono text-muted-foreground/30">{hint}</span>
+            </div>
+          ))}
         </div>
-        <div className="text-[8.5px] font-mono text-muted-foreground/35 leading-relaxed">
-          GPS/HF: 100·(0.4Kp+0.3Bz↓+0.3P)·0.8 · Uydu: 100·(0.5S+0.5P)·0.9
+      )}
+      {/* Formül notu */}
+      <div className="mt-2 space-y-0.5">
+        <div className="text-[8px] font-mono text-muted-foreground/35 leading-relaxed">
+          R = 100·S·G·A  |  G = L×C×T  (Türkiye: L=0.8, C=1.0)
         </div>
-        <div className="text-[8.5px] font-mono text-muted-foreground/35 leading-relaxed">
-          Şebeke: 100/(1+e^(-0.08·(R-50))) sigmoid
+        <div className="text-[8px] font-mono text-muted-foreground/30 leading-relaxed">
+          S = 0.18·Kp+0.22·Dst+0.30·dBdt+0.12·V+0.10·Bz↓+0.08·P
         </div>
         <div className="flex items-center gap-1.5 mt-1">
           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-          <span className="text-[8.5px] font-mono text-muted-foreground/40 uppercase tracking-wider">
-            NOAA SWPC · R = 100·S·G·L
+          <span className="text-[8px] font-mono text-muted-foreground/35 uppercase tracking-wider">
+            NOAA SWPC · Şebeke: sigmoid(R_grid-50)
           </span>
         </div>
       </div>
