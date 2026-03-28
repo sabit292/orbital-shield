@@ -119,6 +119,174 @@ function physicsCalc(
   return { F, fmtF: fmtF(F), gpsR, satR, Pd, fLvl, gLvl, sLvl };
 }
 
+// ── Storm type classifier ─────────────────────────────────────────────────────
+type StormTypeId = "CME" | "CORONAL_HOLE" | "SUDDEN_SHOCK" | "LONG_WEAK" | "NONE";
+
+interface StormClassification {
+  id:          StormTypeId;
+  label:       string;    // Turkish display
+  labelEn:     string;    // English scientific name
+  icon:        string;
+  color:       string;    // Tailwind text-* class
+  bg:          string;    // Tailwind bg + border classes
+  description: string;
+  confidence:  number;    // 0–100
+  signatures:  string[];  // key physical signatures that triggered this
+}
+
+function classifyStorm(data: SpaceWeatherData, history?: HistoricalData): StormClassification {
+  const V      = data.solarWind.speed;
+  const Bz     = data.magneticField.bz;
+  const n      = data.solarWind.density;
+  const Kp     = data.kpIndex;
+  const Fluxp  = (data as any).protonFlux ?? 0;
+
+  const speedHist = history?.speedHistory ?? [];
+  const bzHist    = history?.bzHistory    ?? [];
+  const kpHist    = history?.kpHistory    ?? [];
+
+  // ── Derive trend values from real history ───────────────────────────────────
+  // Speed 1h ago (12 × 5-min points), 15min ago (3 points)
+  const speed1h    = speedHist.length >= 12 ? speedHist[speedHist.length - 12].value : V;
+  const speed15m   = speedHist.length >=  3 ? speedHist[speedHist.length -  3].value : V;
+  const dV1h       = V - speed1h;    // km/s gained in last 1 hour
+  const dV15m      = V - speed15m;   // km/s gained in last 15 min
+
+  // Bz change in last 15 min (sudden rotation signal)
+  const bz15m      = bzHist.length >= 3 ? bzHist[bzHist.length - 3].value : Bz;
+  const dBz15m     = Bz - bz15m;
+
+  // Dynamic pressure ratio: now vs 1h ago (approximate n1h with baseline)
+  const Pd         = 1.67e-6 * n * V * V;
+  const Pd1h_est   = 1.67e-6 * 5 * speed1h * speed1h;   // density baseline 5 p/cm³
+  const pdRatio    = Pd / Math.max(Pd1h_est, 0.1);
+
+  // Fraction of last 2h of kpHistory readings that are ≥3 (sustained moderate)
+  const recent24   = kpHist.slice(-24);   // ~2h at 5-min intervals
+  const sustained  = recent24.length > 0
+    ? recent24.filter(p => p.kp >= 3).length / recent24.length
+    : 0;
+
+  // ── Scoring (each type gets a 0–100 score) ──────────────────────────────────
+  const scores = { SUDDEN_SHOCK: 0, CME: 0, CORONAL_HOLE: 0, LONG_WEAK: 0 };
+
+  // --- ANİ ŞOK: very fast speed jump + abrupt Bz rotation ─────────────────────
+  if (dV15m > 100)             scores.SUDDEN_SHOCK += 55;
+  else if (dV15m > 60)         scores.SUDDEN_SHOCK += 35;
+  else if (dV15m > 30)         scores.SUDDEN_SHOCK += 15;
+  if (Math.abs(dBz15m) > 10)  scores.SUDDEN_SHOCK += 30;
+  else if (Math.abs(dBz15m) > 6) scores.SUDDEN_SHOCK += 15;
+  if (pdRatio > 3.5)           scores.SUDDEN_SHOCK += 20;
+  else if (pdRatio > 2.0)      scores.SUDDEN_SHOCK += 10;
+
+  // --- CME: 1h speed surge + elevated proton flux + strong Bz + high Pd ───────
+  if (dV1h > 150)              scores.CME += 45;
+  else if (dV1h > 80)          scores.CME += 25;
+  else if (dV1h > 40)          scores.CME += 10;
+  if (Fluxp > 100)             scores.CME += 40;
+  else if (Fluxp > 10)         scores.CME += 25;
+  else if (Fluxp > 5)          scores.CME += 10;
+  if (V > 600 && Bz < -12)    scores.CME += 20;
+  else if (V > 500 && Bz < -8) scores.CME += 10;
+  if (pdRatio > 2.5)           scores.CME += 10;
+
+  // --- KORONAL DELİK: elevated but stable speed + low density + no protons ────
+  if (V > 450 && dV1h < 50)   scores.CORONAL_HOLE += 30;  // fast but not surging
+  if (n < 5)                   scores.CORONAL_HOLE += 30;
+  else if (n < 8)              scores.CORONAL_HOLE += 18;
+  if (Fluxp < 3)               scores.CORONAL_HOLE += 20;
+  if (V > 480)                 scores.CORONAL_HOLE += 10;
+  // Alfvénic proxy: Bz oscillating (non-zero delta but not huge)
+  if (Math.abs(dBz15m) > 2 && Math.abs(dBz15m) < 8)
+                               scores.CORONAL_HOLE += 10;
+
+  // --- UZUN SÜRELİ ZAYIF: sustained moderate Kp + normal speed + moderate Bz ──
+  if (Kp >= 3 && Kp <= 5.5)   scores.LONG_WEAK += 30;
+  if (V < 550)                 scores.LONG_WEAK += 20;
+  if (Math.abs(Bz) >= 5 && Math.abs(Bz) <= 15) scores.LONG_WEAK += 20;
+  if (sustained > 0.7)         scores.LONG_WEAK += 25;
+  else if (sustained > 0.4)    scores.LONG_WEAK += 12;
+  if (Fluxp < 5)               scores.LONG_WEAK += 10;
+
+  // ── Pick winner ─────────────────────────────────────────────────────────────
+  const maxScore = Math.max(...Object.values(scores));
+  const MIN_THRESHOLD = 25;
+
+  if (Kp < 2 && V < 500 && Math.abs(Bz) < 5 && maxScore < MIN_THRESHOLD) {
+    return {
+      id: "NONE", label: "AKTİVİTE YOK", labelEn: "Quiet Conditions", icon: "◌",
+      color: "text-primary/50", bg: "bg-primary/5 border-primary/15",
+      description: "Uzay hava koşulları sakin. Belirgin fırtına türü imzası tespit edilmedi.",
+      confidence: 92, signatures: []
+    };
+  }
+
+  const winner = (Object.entries(scores)
+    .reduce((a, b) => a[1] >= b[1] ? a : b)[0]) as keyof typeof scores;
+  const conf = Math.min(95, Math.round(45 + scores[winner] * 0.45));
+
+  const defs: Record<keyof typeof scores, Omit<StormClassification, "confidence">> = {
+    SUDDEN_SHOCK: {
+      id: "SUDDEN_SHOCK",
+      label: "ANİ ŞOK",
+      labelEn: "Sudden Storm Commencement",
+      icon: "⚡",
+      color: "text-danger",
+      bg: "bg-danger/10 border-danger/40",
+      description: "Hızlı dinamik basınç artışı ve ani Bz rotasyonu tespit edildi. Plazma şoku magnetopozda kısa sürede sıkıştırma oluşturdu.",
+      signatures: [
+        `+${dV15m.toFixed(0)} km/s / 15dk`,
+        `Bz ${dBz15m > 0 ? "+" : ""}${dBz15m.toFixed(1)} nT rotasyon`,
+        `Pd ${pdRatio.toFixed(1)}× artış`,
+      ],
+    },
+    CME: {
+      id: "CME",
+      label: "CME KAYNAKLI",
+      labelEn: "Coronal Mass Ejection",
+      icon: "☄",
+      color: "text-danger",
+      bg: "bg-danger/10 border-danger/40",
+      description: "Güneş'ten fırlayan yüklü plazma bulutu manyetosferle çarpıştı. Yüksek proton akısı ve hız artışı CME imzası taşıyor.",
+      signatures: [
+        `+${dV1h.toFixed(0)} km/s / 1s hız artışı`,
+        ...(Fluxp > 3 ? [`${Fluxp.toFixed(0)} pfu proton akısı`] : []),
+        `Bz ${Bz.toFixed(1)} nT`,
+      ],
+    },
+    CORONAL_HOLE: {
+      id: "CORONAL_HOLE",
+      label: "KORONAL DELİK",
+      labelEn: "High-Speed Stream (HSS)",
+      icon: "◎",
+      color: "text-warning",
+      bg: "bg-warning/10 border-warning/40",
+      description: "Güneş'te koronal delikten çıkan hızlı rüzgâr akımı (HSS). Düşük yoğunluk ve Alfvénik dalgalanmalar karakteristik imzadır.",
+      signatures: [
+        `${V.toFixed(0)} km/s stabil hız`,
+        `${n.toFixed(1)} p/cm³ düşük yoğunluk`,
+        "Proton olayı yok",
+      ],
+    },
+    LONG_WEAK: {
+      id: "LONG_WEAK",
+      label: "UZUN SÜRELİ ZAYIF",
+      labelEn: "Long-Duration Weak Storm",
+      icon: "〜",
+      color: "text-yellow-400",
+      bg: "bg-yellow-500/10 border-yellow-500/30",
+      description: "Süregelen ılımlı jeomagnetik aktivite. Normal hız, hafif güney Bz ve uzun süreli Kp baskısı karakteristik.",
+      signatures: [
+        `Kp ${Kp.toFixed(1)} sürekli`,
+        `${(sustained * 100).toFixed(0)}% ölçüm aktif`,
+        `Bz ${Bz.toFixed(1)} nT`,
+      ],
+    },
+  };
+
+  return { ...defs[winner], confidence: conf };
+}
+
 // ── Reason generator — physics + real NOAA history ───────────────────────────
 type ReasonLevel = "info" | "warning" | "danger";
 interface Reason { text: string; level: ReasonLevel }
@@ -274,6 +442,8 @@ export function AiInsightCard({
 
   // Dynamic reasons from physics + real history
   const reasons = (data && phy) ? generateReasons(data, phy, history) : [];
+  // Storm type classification
+  const storm = data ? classifyStorm(data, history) : null;
 
   // Bullet dot color
   const dotColor = (lvl: ReasonLevel) =>
@@ -293,6 +463,48 @@ export function AiInsightCard({
           <span>TAHMİN: {riskTr(pred.riskLevel)} RİSK</span>
           <span className="text-[9px] font-mono opacity-80">YZ %{pred.confidence ?? 91.4} güven</span>
         </div>
+
+        {/* ── Fırtına türü sınıflandırması ──────────────────────────── */}
+        {storm && (
+          <div className={cn("rounded border p-2.5", storm.bg)}>
+            {/* Badge row */}
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className={cn("text-base leading-none", storm.color)}>{storm.icon}</span>
+                <span className={cn("text-[11px] font-display font-bold tracking-wide", storm.color)}>
+                  {storm.label}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] font-mono text-muted-foreground">YZ</span>
+                <span className={cn("text-[10px] font-mono font-bold", storm.color)}>
+                  %{storm.confidence}
+                </span>
+              </div>
+            </div>
+            {/* Scientific name */}
+            <div className="text-[8px] font-mono text-muted-foreground/70 mb-1.5 italic">
+              {storm.labelEn}
+            </div>
+            {/* Description */}
+            <p className="text-[10px] font-mono text-muted-foreground leading-snug mb-1.5">
+              {storm.description}
+            </p>
+            {/* Key signature pills */}
+            {storm.signatures.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {storm.signatures.map((sig, i) => (
+                  <span key={i} className={cn(
+                    "text-[8px] font-mono px-1.5 py-0.5 rounded-sm border",
+                    storm.color, storm.bg
+                  )}>
+                    {sig}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Sebep listesi ─────────────────────────────────────────── */}
         {reasons.length > 0 && (
