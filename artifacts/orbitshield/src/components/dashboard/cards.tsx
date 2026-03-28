@@ -95,7 +95,7 @@ export function KpCard({ data, pred }: { data?: SpaceWeatherData; pred?: AIPredi
 // ── Physics engine (used by AI card) ─────────────────────────────────────────
 function physicsCalc(
   V: number, Bz: number, n: number, Kp: number,
-  Dst: number, Fluxp: number,
+  Dst: number, Fluxp: number, xrayFlux: number = 1e-8,
   history?: HistoricalData
 ) {
   const bzHist    = history?.bzHistory    ?? [];
@@ -159,13 +159,21 @@ function physicsCalc(
   const F       = F_final;
   const fLabel  = "F_final";
 
-  // ── Risk scores ────────────────────────────────────────────────────────────
-  // GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)
-  const gpsR = 0.5 * (absBz / 20) + 0.3 * (V / 1000) + 0.2 * (Kp / 9);
+  // ── Risk scores — sunucu formülleriyle eşleştirildi ───────────────────────
+  const clampN = (v: number) => Math.min(1, Math.max(0, v));
+  const Kp_n   = clampN(Kp / 9);
+  const Bz_n   = clampN((-Bz) / 25);            // güney yönlü Bz
+  const V_n    = clampN((V - 300) / 700);        // 300–1000 km/s aralığı
+  const Dst_n  = clampN(Math.abs(Dst) / 300);   // -300 nT = ciddi fırtına
+  const P_n    = clampN(Math.max(Fluxp, 0) / 1000);  // S3=1000 pfu
+  const X_n    = clampN(xrayFlux / 1e-4);        // X10=1.0
 
-  // SATrisk = 0.4·(Pd/50) + 0.4·(Fluxp/1000) + 0.2·(|Dst|/200)
+  // GPS/GNSS: iyonosferik scintillasyon (sunucu R_gps, G dahil edilmedi)
+  const gpsR = clampN((0.35*Kp_n + 0.30*Bz_n + 0.25*X_n + 0.10*V_n) * 0.85);
+
+  // Uydu: radyasyon + yüzey şarjı (sunucu R_sat, G dahil edilmedi)
   const Pd   = Pd_now;
-  const satR = 0.4 * (Pd / 50) + 0.4 * (Math.max(Fluxp, 0) / 1000) + 0.2 * (Math.abs(Dst) / 200);
+  const satR = clampN((0.45*P_n + 0.30*Kp_n + 0.15*Dst_n + 0.10*Bz_n) * 0.90);
 
   const fmt  = (f: number) =>
     f >= 1e6 ? (f / 1e6).toFixed(2) + "M" : f >= 1e3 ? (f / 1e3).toFixed(1) + "k" : f.toFixed(0);
@@ -499,8 +507,9 @@ export function AiInsightCard({
     data.magneticField.bz,
     data.solarWind.density,
     data.kpIndex,
-    (data as any).dstIndex  ?? 0,
-    (data as any).protonFlux ?? 5,
+    (data as any).dstIndex      ?? 0,
+    (data as any).protonFlux10MeV ?? (data as any).protonFlux ?? 0.1,
+    (data as any).xray?.flux    ?? 1e-8,
     history
   ) : null;
 
@@ -649,46 +658,56 @@ export function AiInsightCard({
               })}
             </div>
 
-            {/* En Etkili Faktörler */}
+            {/* En Etkili Faktörler — S skoru gerçek katkıları (sunucuyla eşleştirildi) */}
             <div className="border-t border-accent/15 pt-2">
               <div className="text-xs font-display text-accent/60 uppercase tracking-widest mb-2">En Etkili Faktörler</div>
-              {(() => {
+              {data && (() => {
+                const Kp  = data.kpIndex;
+                const Bz  = data.magneticField.bz;
+                const V   = data.solarWind.speed;
+                const Dst = (data as any).dstIndex ?? 0;
+                const P   = (data as any).protonFlux10MeV ?? 0.1;
+                const X   = (data as any).xray?.flux ?? 1e-8;
+                const n01 = (v: number) => Math.min(1, Math.max(0, v));
+
+                // Sunucuyla aynı normalleştirme
+                const Kp_n  = n01(Kp / 9);
+                const Dst_n = n01(Math.abs(Dst) / 300);
+                const Bz_n  = n01((-Bz) / 25);
+                const V_n   = n01((V - 300) / 700);
+                const P_n   = n01(P / 1000);
+                const X_n   = n01(X / 1e-4);
+
+                const xLabel = X >= 1e-4
+                  ? `X≥${(X/1e-4).toFixed(1)} (X sınıfı)`
+                  : X >= 1e-5
+                  ? `M${(X/1e-5).toFixed(1)} sınıfı`
+                  : `B/C ${(X*1e6).toFixed(2)}µW/m²`;
+
                 const factors = [
-                  {
-                    label: `|Bz| = ${phy.absBz.toFixed(1)} nT`,
-                    note: "güney Bz",
-                    pct: Math.min(1, phy.absBz / 30),
-                    color: phy.absBz > 15 ? "bg-danger" : phy.absBz > 5 ? "bg-warning" : "bg-success",
-                  },
-                  {
-                    label: `dBz/dt = ${phy.dBzdt.toFixed(1)} nT/5dk`,
-                    note: "değişim hızı",
-                    pct: Math.min(1, Math.abs(phy.dBzdt) / 8),
-                    color: Math.abs(phy.dBzdt) > 4 ? "bg-danger" : Math.abs(phy.dBzdt) > 1.5 ? "bg-warning" : "bg-success",
-                  },
-                  {
-                    label: `V = ${phy.V.toFixed(0)} km/s`,
-                    note: "güneş rüzgarı",
-                    pct: Math.min(1, phy.V / 800),
-                    color: phy.V > 600 ? "bg-danger" : phy.V > 400 ? "bg-warning" : "bg-success",
-                  },
-                  {
-                    label: `t_Bz<0 = ${phy.tBzNeg < 1 ? `${(phy.tBzNeg*60).toFixed(0)}dk` : `${phy.tBzNeg.toFixed(1)}s`}`,
-                    note: "neg. Bz süresi",
-                    pct: Math.min(1, phy.tBzNeg / 6),
-                    color: phy.tBzNeg > 3 ? "bg-danger" : phy.tBzNeg > 1 ? "bg-warning" : "bg-success",
-                  },
-                ].sort((a, b) => b.pct - a.pct);
-                return factors.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2 mb-1.5">
-                    <span className="text-xs font-mono text-muted-foreground/70 w-[110px] shrink-0 truncate">{f.label}</span>
-                    <div className="flex-1 h-[6px] bg-white/8 rounded-full overflow-hidden">
-                      <div className={cn("h-full rounded-full transition-all", f.color)} style={{ width: `${f.pct * 100}%` }} />
+                  { label: `Kp = ${Kp.toFixed(1)}`,             note: "jeomanyetik",   val: Kp_n,  w: 0.25 },
+                  { label: `Dst = ${Dst} nT`,                    note: "halka akımı",   val: Dst_n, w: 0.20 },
+                  { label: `Bz = ${Bz.toFixed(1)} nT`,          note: "güney yönlü",   val: Bz_n,  w: 0.20 },
+                  { label: `V = ${V.toFixed(0)} km/s`,           note: "güneş rüzgarı", val: V_n,   w: 0.15 },
+                  { label: `P₁₀ = ${P.toFixed(2)} pfu`,         note: "proton akısı",  val: P_n,   w: 0.12 },
+                  { label: xLabel,                                note: "X-ışını",       val: X_n,   w: 0.08 },
+                ]
+                  .map(f => ({ ...f, contrib: f.val * f.w }))
+                  .sort((a, b) => b.contrib - a.contrib);
+
+                return factors.map((f, i) => {
+                  const color = f.val > 0.66 ? "bg-danger" : f.val > 0.33 ? "bg-warning" : "bg-success";
+                  return (
+                    <div key={i} className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xs font-mono text-muted-foreground/70 w-[112px] shrink-0 truncate">{f.label}</span>
+                      <div className="flex-1 h-[6px] bg-white/8 rounded-full overflow-hidden">
+                        <div className={cn("h-full rounded-full transition-all", color)} style={{ width: `${f.val * 100}%` }} />
+                      </div>
+                      <span className="text-xs font-mono text-muted-foreground/60 w-7 text-right shrink-0">{(f.val*100).toFixed(0)}%</span>
+                      <span className="text-[10px] font-mono text-muted-foreground/35 w-[58px] text-right shrink-0 truncate">{f.note}</span>
                     </div>
-                    <span className="text-xs font-mono text-muted-foreground/60 w-8 text-right shrink-0">{(f.pct*100).toFixed(0)}%</span>
-                    <span className="text-[10px] font-mono text-muted-foreground/35 w-[58px] text-right shrink-0 truncate">{f.note}</span>
-                  </div>
-                ));
+                  );
+                });
               })()}
             </div>
 
@@ -698,7 +717,7 @@ export function AiInsightCard({
               <PhysiBar label="SATrisk" pct={phy.satR} lvl={phy.sLvl} />
             </div>
             <div className="text-[9px] font-mono text-muted-foreground/40 leading-relaxed">
-              GPS=0.5·|Bz|/20+0.3·V/1k+0.2·Kp/9 · SAT=0.4·Pd/50+0.4·Fp/1k+0.2·|Dst|/200
+              GPS=(0.35·Kp+0.30·Bz↓+0.25·X+0.10·V)·0.85 · SAT=(0.45·P+0.30·Kp+0.15·Dst+0.10·Bz)·0.90
             </div>
           </div>
         )}

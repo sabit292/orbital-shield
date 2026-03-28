@@ -459,8 +459,10 @@ router.get("/current", async (req, res) => {
       const arr = plasma.value as Array<{
         proton_speed?: number; proton_density?: number; proton_temperature?: number; active?: boolean;
       }>;
-      // En son "active" kaydı tercih et, yoksa son kayıt
-      const last = arr.slice().reverse().find(r => r.active !== false) ?? arr[arr.length - 1];
+      // En son "active" VE geçerli (null olmayan) kaydı seç — null kayıtlar atlanır
+      const last = arr.slice().reverse().find(r => r.active !== false && r.proton_speed != null)
+                ?? arr.slice().reverse().find(r => r.proton_speed != null)
+                ?? arr[arr.length - 1];
       if (last) {
         speed   = isFinite(last.proton_speed   ?? NaN) ? last.proton_speed!   : 450;
         density = isFinite(last.proton_density  ?? NaN) ? last.proton_density! : 8;
@@ -474,7 +476,9 @@ router.get("/current", async (req, res) => {
         bz_gsm?: number; bx_gsm?: number; by_gsm?: number; bt?: number;
         theta_gsm?: number; phi_gsm?: number; active?: boolean;
       }>;
-      const last = arr.slice().reverse().find(r => r.active !== false) ?? arr[arr.length - 1];
+      const last = arr.slice().reverse().find(r => r.active !== false && r.bz_gsm != null)
+                ?? arr.slice().reverse().find(r => r.bz_gsm != null)
+                ?? arr[arr.length - 1];
       if (last) {
         bx    = isFinite(last.bx_gsm    ?? NaN) ? last.bx_gsm!    : 1;
         by    = isFinite(last.by_gsm    ?? NaN) ? last.by_gsm!    : -1;
