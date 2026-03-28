@@ -460,11 +460,11 @@ function PhysiBar({ label, pct, lvl }: { label: string; pct: number; lvl: string
   const bar = lvl === "danger" ? "bg-danger" : lvl === "warning" ? "bg-warning" : "bg-success";
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] font-mono text-muted-foreground w-[72px] shrink-0 truncate">{label}</span>
-      <div className="flex-1 h-[5px] bg-white/8 rounded-full overflow-hidden">
+      <span className="text-xs font-mono text-muted-foreground w-[72px] shrink-0 truncate">{label}</span>
+      <div className="flex-1 h-[6px] bg-white/8 rounded-full overflow-hidden">
         <div className={cn("h-full rounded-full", bar)} style={{ width: `${Math.min(100, pct * 100)}%` }} />
       </div>
-      <span className={cn("text-[10px] font-mono w-8 text-right shrink-0",
+      <span className={cn("text-xs font-mono w-8 text-right shrink-0",
         lvl === "danger" ? "text-danger" : lvl === "warning" ? "text-warning" : "text-success"
       )}>{(pct * 100).toFixed(0)}%</span>
     </div>
@@ -521,11 +521,11 @@ export function AiInsightCard({
 
         {/* ── Tahmin header ────────────────────────────────────────── */}
         <div className={cn(
-          "flex items-center justify-between rounded px-3 py-2 border text-sm font-display font-bold",
+          "flex items-center justify-between rounded px-3 py-2.5 border text-base font-display font-bold",
           riskHeaderColor
         )}>
           <span>TAHMİN: {riskTr(pred.riskLevel)} RİSK</span>
-          <span className="text-[11px] font-mono opacity-80">YZ %{pred.confidence ?? 91.4} güven</span>
+          <span className="text-xs font-mono opacity-80">YZ %{pred.confidence ?? 91.4} güven</span>
         </div>
 
         {/* ── Fırtına türü sınıflandırması ──────────────────────────── */}
@@ -534,24 +534,24 @@ export function AiInsightCard({
             {/* Badge row */}
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className={cn("text-lg leading-none", storm.color)}>{storm.icon}</span>
-                <span className={cn("text-sm font-display font-bold tracking-wide", storm.color)}>
+                <span className={cn("text-xl leading-none", storm.color)}>{storm.icon}</span>
+                <span className={cn("text-base font-display font-bold tracking-wide", storm.color)}>
                   {storm.label}
                 </span>
               </div>
               <div className="flex items-center gap-1">
-                <span className="text-[10px] font-mono text-muted-foreground">YZ</span>
-                <span className={cn("text-xs font-mono font-bold", storm.color)}>
+                <span className="text-xs font-mono text-muted-foreground">YZ</span>
+                <span className={cn("text-sm font-mono font-bold", storm.color)}>
                   %{storm.confidence}
                 </span>
               </div>
             </div>
             {/* Scientific name */}
-            <div className="text-[10px] font-mono text-muted-foreground/70 mb-1.5 italic">
+            <div className="text-xs font-mono text-muted-foreground/70 mb-1.5 italic">
               {storm.labelEn}
             </div>
             {/* Description */}
-            <p className="text-xs font-mono text-muted-foreground leading-relaxed mb-2">
+            <p className="text-sm font-mono text-muted-foreground leading-relaxed mb-2">
               {storm.description}
             </p>
             {/* Key signature pills */}
@@ -559,7 +559,7 @@ export function AiInsightCard({
               <div className="flex flex-wrap gap-1.5">
                 {storm.signatures.map((sig, i) => (
                   <span key={i} className={cn(
-                    "text-[10px] font-mono px-2 py-0.5 rounded border",
+                    "text-xs font-mono px-2 py-0.5 rounded border",
                     storm.color, storm.bg
                   )}>
                     {sig}
@@ -572,14 +572,14 @@ export function AiInsightCard({
 
         {/* ── Sebep listesi ─────────────────────────────────────────── */}
         {reasons.length > 0 && (
-          <div className="bg-black/40 border border-white/8 rounded p-2.5 space-y-1.5">
-            <div className="text-[10px] font-display text-muted-foreground uppercase tracking-widest mb-2">
+          <div className="bg-black/40 border border-white/8 rounded p-3 space-y-2">
+            <div className="text-xs font-display text-muted-foreground uppercase tracking-widest mb-2">
               Sebep
             </div>
             {reasons.map((r, i) => (
               <div key={i} className="flex items-start gap-2">
-                <span className={cn("mt-[3px] shrink-0 text-[10px]", dotColor(r.level))}>▶</span>
-                <span className={cn("text-xs font-mono leading-relaxed", textColor(r.level))}>
+                <span className={cn("mt-[2px] shrink-0 text-xs", dotColor(r.level))}>▶</span>
+                <span className={cn("text-sm font-mono leading-relaxed", textColor(r.level))}>
                   {r.text}
                 </span>
               </div>
@@ -604,12 +604,12 @@ export function AiInsightCard({
           <div className="bg-black/40 border border-accent/20 rounded p-3 space-y-2">
             {/* Header row */}
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-display text-accent/80 uppercase tracking-widest">Fizik Motoru</span>
+              <span className="text-xs font-display text-accent/80 uppercase tracking-widest">Fizik Motoru</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-mono text-accent/60 border border-accent/30 rounded px-1.5 py-0.5">
+                <span className="text-[10px] font-mono text-accent/60 border border-accent/30 rounded px-1.5 py-0.5">
                   {phy.fLabel}
                 </span>
-                <span className={cn("text-xs font-mono font-bold",
+                <span className={cn("text-sm font-mono font-bold",
                   phy.fLvl === "danger" ? "text-danger" : phy.fLvl === "warning" ? "text-warning" : "text-success"
                 )}>{phy.fmtF}</span>
               </div>
@@ -631,19 +631,19 @@ export function AiInsightCard({
                 const txtColor = v < 80_000 ? "text-success" : v < 400_000 ? "text-warning" : "text-danger";
                 return (
                   <div key={label} className={cn(
-                    "flex items-center gap-2 rounded px-1.5 py-0.5",
+                    "flex items-center gap-2 rounded px-1.5 py-1",
                     active ? "bg-accent/10 outline outline-[0.5px] outline-accent/40" : ""
                   )}>
-                    <span className={cn("text-[10px] font-mono w-[46px] shrink-0", active ? "text-accent font-bold" : "text-muted-foreground/55")}>
+                    <span className={cn("text-xs font-mono w-[52px] shrink-0", active ? "text-accent font-bold" : "text-muted-foreground/55")}>
                       {label}
                     </span>
-                    <div className="flex-1 h-1 bg-white/8 rounded-full overflow-hidden">
+                    <div className="flex-1 h-1.5 bg-white/8 rounded-full overflow-hidden">
                       <div className={cn("h-full rounded-full", active ? lvlColor : "bg-white/20")} style={{ width: `${logPct}%` }} />
                     </div>
-                    <span className={cn("text-[10px] font-mono w-9 text-right shrink-0", active ? txtColor : "text-muted-foreground/45")}>
+                    <span className={cn("text-xs font-mono w-10 text-right shrink-0", active ? txtColor : "text-muted-foreground/45")}>
                       {fmtV}
                     </span>
-                    <span className="text-[8px] font-mono text-muted-foreground/35 w-[54px] text-right shrink-0 truncate">{note}</span>
+                    <span className="text-[9px] font-mono text-muted-foreground/35 w-[54px] text-right shrink-0 truncate">{note}</span>
                   </div>
                 );
               })}
@@ -651,7 +651,7 @@ export function AiInsightCard({
 
             {/* En Etkili Faktörler */}
             <div className="border-t border-accent/15 pt-2">
-              <div className="text-[10px] font-display text-accent/60 uppercase tracking-widest mb-1.5">En Etkili Faktörler</div>
+              <div className="text-xs font-display text-accent/60 uppercase tracking-widest mb-2">En Etkili Faktörler</div>
               {(() => {
                 const factors = [
                   {
@@ -680,13 +680,13 @@ export function AiInsightCard({
                   },
                 ].sort((a, b) => b.pct - a.pct);
                 return factors.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-mono text-muted-foreground/70 w-[100px] shrink-0 truncate">{f.label}</span>
-                    <div className="flex-1 h-[5px] bg-white/8 rounded-full overflow-hidden">
+                  <div key={i} className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs font-mono text-muted-foreground/70 w-[110px] shrink-0 truncate">{f.label}</span>
+                    <div className="flex-1 h-[6px] bg-white/8 rounded-full overflow-hidden">
                       <div className={cn("h-full rounded-full transition-all", f.color)} style={{ width: `${f.pct * 100}%` }} />
                     </div>
-                    <span className="text-[10px] font-mono text-muted-foreground/60 w-7 text-right shrink-0">{(f.pct*100).toFixed(0)}%</span>
-                    <span className="text-[9px] font-mono text-muted-foreground/35 w-[56px] text-right shrink-0 truncate">{f.note}</span>
+                    <span className="text-xs font-mono text-muted-foreground/60 w-8 text-right shrink-0">{(f.pct*100).toFixed(0)}%</span>
+                    <span className="text-[10px] font-mono text-muted-foreground/35 w-[58px] text-right shrink-0 truncate">{f.note}</span>
                   </div>
                 ));
               })()}
@@ -697,7 +697,7 @@ export function AiInsightCard({
               <PhysiBar label="GPSrisk" pct={phy.gpsR} lvl={phy.gLvl} />
               <PhysiBar label="SATrisk" pct={phy.satR} lvl={phy.sLvl} />
             </div>
-            <div className="text-[8px] font-mono text-muted-foreground/40 leading-relaxed">
+            <div className="text-[9px] font-mono text-muted-foreground/40 leading-relaxed">
               GPS=0.5·|Bz|/20+0.3·V/1k+0.2·Kp/9 · SAT=0.4·Pd/50+0.4·Fp/1k+0.2·|Dst|/200
             </div>
           </div>
