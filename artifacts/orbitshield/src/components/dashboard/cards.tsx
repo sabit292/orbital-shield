@@ -119,6 +119,111 @@ function physicsCalc(
   return { F, fmtF: fmtF(F), gpsR, satR, Pd, fLvl, gLvl, sLvl };
 }
 
+// ── Reason generator — physics + real NOAA history ───────────────────────────
+type ReasonLevel = "info" | "warning" | "danger";
+interface Reason { text: string; level: ReasonLevel }
+
+function generateReasons(
+  data: SpaceWeatherData,
+  phy: ReturnType<typeof physicsCalc>,
+  history?: HistoricalData
+): Reason[] {
+  const V      = data.solarWind.speed;
+  const Bz     = data.magneticField.bz;
+  const n      = data.solarWind.density;
+  const Kp     = data.kpIndex;
+  const Dst    = (data as any).dstIndex  ?? 0;
+  const Fluxp  = (data as any).protonFlux ?? 5;
+  const Pd     = 1.67e-6 * n * V * V;
+  const out: Reason[] = [];
+
+  // ── 1. Bz trend from real bzHistory (~15 min = 3 points at 5-min) ──────────
+  const bzHist = history?.bzHistory ?? [];
+  if (bzHist.length >= 4) {
+    const bzThen  = bzHist[Math.max(0, bzHist.length - 4)].value;
+    const delta   = Bz - bzThen;
+    if (delta < -5)
+      out.push({ text: `Bz son 15 dk'da ${delta.toFixed(1)} nT düştü → ${Bz.toFixed(1)} nT (güçlü güney)`, level: "danger" });
+    else if (delta < -2)
+      out.push({ text: `Bz son 15 dk'da ${delta.toFixed(1)} nT azaldı → ${Bz.toFixed(1)} nT`, level: "warning" });
+    else if (Bz < -5)
+      out.push({ text: `Bz ${Bz.toFixed(1)} nT — sabit güney yönlü alan, kuplaj aktif`, level: "warning" });
+    else
+      out.push({ text: `Bz ${Bz.toFixed(1)} nT — stabil alan koşulları`, level: "info" });
+  } else {
+    if (Bz < -10)
+      out.push({ text: `Bz ${Bz.toFixed(1)} nT — kritik güney yönlü manyetik alan`, level: "danger" });
+    else if (Bz < -5)
+      out.push({ text: `Bz ${Bz.toFixed(1)} nT — güney yönlü alan, F kuplaj aktif`, level: "warning" });
+    else
+      out.push({ text: `Bz ${Bz.toFixed(1)} nT — kuzey/nötr alan`, level: "info" });
+  }
+
+  // ── 2. Solar wind speed + Pd change from speedHistory (~1 h = 12 pts) ──────
+  const speedHist = history?.speedHistory ?? [];
+  let pdSuffix = `Pd=${Pd.toFixed(1)} nPa`;
+  if (speedHist.length >= 12) {
+    const vThen  = speedHist[Math.max(0, speedHist.length - 12)].value;
+    const pdThen = 1.67e-6 * 5 * vThen * vThen;          // baseline density ~5
+    const ratio  = Pd / Math.max(pdThen, 0.1);
+    if (ratio > 2.5)
+      pdSuffix = `Pd=${Pd.toFixed(1)} nPa — ${ratio.toFixed(1)}× arttı`;
+    else if (ratio > 1.5)
+      pdSuffix = `Pd=${Pd.toFixed(1)} nPa — ${ratio.toFixed(1)}× yükseldi`;
+  }
+  if (V > 700)
+    out.push({ text: `Güneş rüzgarı ${V.toFixed(0)} km/s — ${pdSuffix}`, level: "danger" });
+  else if (V > 500)
+    out.push({ text: `Güneş rüzgarı ${V.toFixed(0)} km/s — ${pdSuffix}`, level: "warning" });
+  else
+    out.push({ text: `Güneş rüzgarı ${V.toFixed(0)} km/s — ${pdSuffix}`, level: "info" });
+
+  // ── 3. F coupling function (physics engine) ─────────────────────────────────
+  if (phy.F > 400_000)
+    out.push({ text: `Enerji kuplaj F=${phy.fmtF} — yüksek magnetosferik enerji girişi`, level: "danger" });
+  else if (phy.F > 80_000)
+    out.push({ text: `Enerji kuplaj F=${phy.fmtF} — orta magnetosferik aktivite`, level: "warning" });
+  else
+    out.push({ text: `Enerji kuplaj F=${phy.fmtF} — sakin magnetosfer`, level: "info" });
+
+  // ── 4. GPS/SAT risk from physics formulas ──────────────────────────────────
+  const maxRisk = Math.max(phy.gpsR, phy.satR);
+  if (maxRisk > 0.25) {
+    const lvl: ReasonLevel = maxRisk > 0.5 ? "danger" : "warning";
+    out.push({ text: `Fizik motoru: GPS %${(phy.gpsR * 100).toFixed(0)}, SAT %${(phy.satR * 100).toFixed(0)} risk`, level: lvl });
+  }
+
+  // ── 5. Dst index (real NOAA) ────────────────────────────────────────────────
+  if (Dst < -100)
+    out.push({ text: `Dst ${Dst} nT — büyük manyetik fırtına (ring current yüklü)`, level: "danger" });
+  else if (Dst < -50)
+    out.push({ text: `Dst ${Dst} nT — orta manyetik fırtına`, level: "warning" });
+  else if (Dst < -20)
+    out.push({ text: `Dst ${Dst} nT — zayıf jeomagnetik baskı`, level: "info" });
+
+  // ── 6. Proton flux (real NOAA) ──────────────────────────────────────────────
+  if (Fluxp > 100)
+    out.push({ text: `Proton akısı ${Fluxp.toFixed(0)} pfu — radyasyon kuşağı tehlikeli`, level: "danger" });
+  else if (Fluxp > 10)
+    out.push({ text: `Proton akısı ${Fluxp.toFixed(0)} pfu — artmış uzay radyasyonu`, level: "warning" });
+
+  // ── 7. Historical Kp pattern (real kpHistory from NOAA) ────────────────────
+  const kpHist = history?.kpHistory ?? [];
+  if (kpHist.length >= 5) {
+    const pts       = kpHist.slice(-48);
+    const threshold = Math.max(Math.ceil(Kp + 0.5), 3);
+    const above     = pts.filter(p => p.kp >= threshold).length;
+    if (above > 0) {
+      const lvl: ReasonLevel = threshold >= 6 ? "danger" : threshold >= 4 ? "warning" : "info";
+      out.push({ text: `Son ${pts.length} ölçümün ${above}'sinde Kp≥${threshold} gözlemlendi`, level: lvl });
+    } else {
+      out.push({ text: `Son ${pts.length} ölçümde Kp<${threshold} — geçmiş periyot sakin`, level: "info" });
+    }
+  }
+
+  return out;
+}
+
 function PhysiBar({ label, pct, lvl }: { label: string; pct: number; lvl: string }) {
   const bar = lvl === "danger" ? "bg-danger" : lvl === "warning" ? "bg-warning" : "bg-success";
   return (
@@ -134,14 +239,15 @@ function PhysiBar({ label, pct, lvl }: { label: string; pct: number; lvl: string
   );
 }
 
-export function AiInsightCard({ pred, data }: { pred?: AIPrediction; data?: SpaceWeatherData }) {
+export function AiInsightCard({
+  pred, data, history
+}: {
+  pred?: AIPrediction;
+  data?: SpaceWeatherData;
+  history?: HistoricalData;
+}) {
   if (!pred) return <Panel title="YAPAY ZEKA ANALİZİ" className="min-h-[150px]" />;
 
-  const getRiskColor = (level: string) => {
-    if (level === "LOW") return "text-success border-success/30 bg-success/10";
-    if (level === "MODERATE") return "text-warning border-warning/30 bg-warning/10";
-    return "text-danger border-danger/30 bg-danger/10";
-  };
   const riskTr = (level: string) =>
     level === "LOW" ? "DÜŞÜK" : level === "MODERATE" ? "ORTA" : level === "HIGH" ? "YÜKSEK" : "KRİTİK";
   const trendTr = (t?: string) =>
@@ -149,37 +255,64 @@ export function AiInsightCard({ pred, data }: { pred?: AIPrediction; data?: Spac
   const trendClr = (t?: string) =>
     t === "RISING" ? "text-danger" : t === "FALLING" ? "text-success" : "text-primary";
 
+  const riskHeaderColor = pred.riskLevel === "LOW"
+    ? "text-success border-success/30 bg-success/10"
+    : pred.riskLevel === "MODERATE"
+    ? "text-warning border-warning/30 bg-warning/10"
+    : "text-danger border-danger/30 bg-danger/10";
+
   // Physics calculations from real NOAA data
   const phy = data ? physicsCalc(
     data.solarWind.speed,
     data.magneticField.bz,
     data.solarWind.density,
     data.kpIndex,
-    data.dstIndex ?? 0,
-    data.protonFlux ?? 5,
+    (data as any).dstIndex ?? 0,
+    (data as any).protonFlux ?? 5,
     0   // dBzdt — single snapshot, 0 default
   ) : null;
+
+  // Dynamic reasons from physics + real history
+  const reasons = (data && phy) ? generateReasons(data, phy, history) : [];
+
+  // Bullet dot color
+  const dotColor = (lvl: ReasonLevel) =>
+    lvl === "danger" ? "text-danger" : lvl === "warning" ? "text-warning" : "text-primary/40";
+  const textColor = (lvl: ReasonLevel) =>
+    lvl === "danger" ? "text-danger/90" : lvl === "warning" ? "text-warning/90" : "text-muted-foreground";
 
   return (
     <Panel title="YAPAY ZEKA ANALİZİ" icon={<Zap className="w-4 h-4 text-accent" />}>
       <div className="space-y-3">
-        {/* Insight text */}
-        <p className="font-mono text-[11px] leading-relaxed text-primary/90 border-l-2 border-accent/50 pl-3">
-          {pred.aiInsight}
-        </p>
 
-        {/* Metrics grid */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-white/5 border border-white/10 rounded p-2">
-            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">Risk Seviyesi</div>
-            <div className={cn("text-xs font-bold font-mono rounded-sm", getRiskColor(pred.riskLevel))}>
-              {riskTr(pred.riskLevel)}
+        {/* ── Tahmin header ────────────────────────────────────────── */}
+        <div className={cn(
+          "flex items-center justify-between rounded px-2.5 py-1.5 border text-xs font-display font-bold",
+          riskHeaderColor
+        )}>
+          <span>TAHMİN: {riskTr(pred.riskLevel)} RİSK</span>
+          <span className="text-[9px] font-mono opacity-80">YZ %{pred.confidence ?? 91.4} güven</span>
+        </div>
+
+        {/* ── Sebep listesi ─────────────────────────────────────────── */}
+        {reasons.length > 0 && (
+          <div className="bg-black/40 border border-white/8 rounded p-2 space-y-1">
+            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-widest mb-1.5">
+              Sebep
             </div>
+            {reasons.map((r, i) => (
+              <div key={i} className="flex items-start gap-1.5">
+                <span className={cn("mt-[3px] shrink-0 text-[8px]", dotColor(r.level))}>▶</span>
+                <span className={cn("text-[10px] font-mono leading-snug", textColor(r.level))}>
+                  {r.text}
+                </span>
+              </div>
+            ))}
           </div>
-          <div className="bg-white/5 border border-white/10 rounded p-2">
-            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">YZ Güveni</div>
-            <div className="text-xs font-bold font-mono text-accent">{pred.confidence ?? 91}%</div>
-          </div>
+        )}
+
+        {/* Metrics grid — fırtına olasılıkları */}
+        <div className="grid grid-cols-2 gap-2">
           <div className="bg-white/5 border border-white/10 rounded p-2">
             <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">Fırtına Olas. 1S</div>
             <div className="text-xs font-bold font-mono text-warning">{pred.stormProbability1h ?? 0}%</div>

@@ -197,7 +197,7 @@ export default function Dashboard() {
             {/* LEFT COLUMN */}
             <div className="lg:col-span-3 flex flex-col gap-3">
               <KpCard data={current} pred={prediction} />
-              <AiInsightCard pred={prediction} data={current} />
+              <AiInsightCard pred={prediction} data={current} history={history} />
               
               <div className="grid grid-cols-2 gap-3 min-h-[200px]">
                 <div className="bg-card/60 border border-white/10 rounded-xl flex flex-col items-center justify-center backdrop-blur-md relative overflow-hidden group py-3">
