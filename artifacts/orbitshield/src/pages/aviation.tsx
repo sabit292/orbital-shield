@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import {
   useGetCurrentSpaceWeather,
@@ -9,16 +9,38 @@ import {
 import {
   Plane, Radio, Navigation, Zap, ShieldAlert,
   TrendingUp, TrendingDown, Minus, ArrowLeft,
-  CheckCircle2, AlertTriangle, XCircle, Clock
+  CheckCircle2, AlertTriangle, XCircle, Clock,
+  Bell, BellRing
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine
 } from "recharts";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+type StatusLevel = "normal" | "caution" | "warning" | "critical";
+
+interface Alarm {
+  id: string;
+  level: "warning" | "critical";
+  title: string;
+  detail: string;
+  routes?: string;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function statusColor(level: "normal" | "caution" | "warning" | "critical") {
+function turkeyTime(): string {
+  const now = new Date();
+  // Turkey is UTC+3 (no DST)
+  const trt = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+  const hh = String(trt.getUTCHours()).padStart(2, "0");
+  const mm = String(trt.getUTCMinutes()).padStart(2, "0");
+  const ss = String(trt.getUTCSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss} TRT`;
+}
+
+function statusColor(level: StatusLevel) {
   return {
     normal:   { bg: "bg-emerald-500/15", text: "text-emerald-400", border: "border-emerald-500/30", dot: "bg-emerald-400" },
     caution:  { bg: "bg-amber-500/15",   text: "text-amber-400",   border: "border-amber-500/30",   dot: "bg-amber-400"   },
@@ -27,15 +49,13 @@ function statusColor(level: "normal" | "caution" | "warning" | "critical") {
   }[level];
 }
 
-function StatusIcon({ level }: { level: "normal" | "caution" | "warning" | "critical" }) {
+function StatusIcon({ level }: { level: StatusLevel }) {
   const cls = "w-4 h-4";
   if (level === "normal")   return <CheckCircle2  className={`${cls} text-emerald-400`} />;
   if (level === "caution")  return <AlertTriangle className={`${cls} text-amber-400`} />;
   if (level === "warning")  return <AlertTriangle className={`${cls} text-orange-400`} />;
   return <XCircle className={`${cls} text-red-400`} />;
 }
-
-type StatusLevel = "normal" | "caution" | "warning" | "critical";
 
 function kpToLevel(kp: number, thresholds: [number, number, number]): StatusLevel {
   if (kp < thresholds[0]) return "normal";
@@ -55,7 +75,136 @@ function TrendIcon({ val, prev }: { val: number; prev: number }) {
   return <TrendingDown className="w-3 h-3 text-emerald-400" />;
 }
 
+// ── AI Danger Alarms ──────────────────────────────────────────────────────────
+
+function buildAlarms(kp: number, bz: number, xray: number, storm24: number, kp6h: number): Alarm[] {
+  const alarms: Alarm[] = [];
+
+  if (kp >= 7) {
+    alarms.push({
+      id: "kp-critical",
+      level: "critical",
+      title: "ŞİDDETLİ JEOMARNETİK FIRTINA — KUTUP GÜZERGAHI KAPATILDI",
+      detail: `Kp=${kp.toFixed(1)} — Kp≥7 eşiği aşıldı. ICAO prosedürleri gereği tüm transpolar uçuşlar güney güzergaha yönlendirilmeli. HF haberleşme büyük ihtimalle kesik.`,
+      routes: "TK 51 (IST-NRT) · TK 9 (IST-LAX)",
+    });
+  } else if (kp >= 5) {
+    alarms.push({
+      id: "kp-warning",
+      level: "warning",
+      title: "ORTA-GÜÇLÜ JEOMAGNETİK AKTİVİTE — KUTUP GÜZERGAHI İZLEMEDE",
+      detail: `Kp=${kp.toFixed(1)} — Polar rota yoğun izlemede. HF kalitesi bozulabilir, SELCAL monitörü aktif tutun. Alternatif güzergah planı hazır olsun.`,
+      routes: "TK 51 (IST-NRT) · TK 9 (IST-LAX) · TK 1 (IST-JFK)",
+    });
+  }
+
+  if (bz < -15) {
+    alarms.push({
+      id: "bz-critical",
+      level: "critical",
+      title: "GÜNEY YÖNELİMLİ Bz KRİTİK — GPS/GNSS GÜVENİLMEZ",
+      detail: `Bz=${bz.toFixed(1)} nT — Çok güçlü güney Bz, iyonosferi ciddi biçimde bozuyor. RNP AR prosedürleri iptal edilmeli, BARO-VNAV veya ILS zorunlu.`,
+      routes: "TK 1 · TK 5 · TK 9 · TK 15 · TK 51 · TK 53",
+    });
+  } else if (bz < -10) {
+    alarms.push({
+      id: "bz-warning",
+      level: "warning",
+      title: "GÜNEY Bz UYARISI — GPS HASSASIYETI AZALDI",
+      detail: `Bz=${bz.toFixed(1)} nT — İyonosferik bozulma başladı. GPS hatası artabilir; uçuş planı ILS yedeklemesiyle güncellenmeli.`,
+      routes: "TK 1 (IST-JFK) · TK 5 (IST-ORD)",
+    });
+  }
+
+  if (xray >= 1e-4) {
+    alarms.push({
+      id: "xray-critical",
+      level: "critical",
+      title: "X SINIFI GÜNEŞ PATLAMASİ — HF BLACKOUT RİSKİ",
+      detail: "X sınıfı patlama tespit edildi. Güneş ışığı altındaki bölgelerde kısa dalga radyo tamamen kesintili olabilir. SATCOM birincil iletişim kanalı olarak kullanılmalı.",
+      routes: "TK 1 · TK 5 · TK 9 · TK 15 (gündüz segmentleri)",
+    });
+  } else if (xray >= 1e-5) {
+    alarms.push({
+      id: "xray-warning",
+      level: "warning",
+      title: "M SINIFI GÜNEŞ PATLAMASİ — HF KALİTESİ DÜŞÜK",
+      detail: "M sınıfı patlama. Gündüz segmentlerinde HF sönümlenmesi bekleniyor. SELCAL takibi ve yedek SATCOM kanalı aktif olmalı.",
+      routes: "TK 1 (IST-JFK) · TK 5 (IST-ORD)",
+    });
+  }
+
+  if (storm24 >= 60) {
+    alarms.push({
+      id: "storm-incoming",
+      level: "critical",
+      title: "YÜKSEK FIRTINA OLASIĞI — ÖN HAZIRLIK ALARMI",
+      detail: `24 saatlik fırtına olasılığı %${storm24.toFixed(0)}. YZ modeli önümüzdeki periyotta önemli jeomagnetik aktivite bekliyor. Tüm uzun menzilli uçuş planlaması revize edilmeli.`,
+    });
+  } else if (storm24 >= 35) {
+    alarms.push({
+      id: "storm-caution",
+      level: "warning",
+      title: "ARTAN FIRTINA OLASIĞI — PLANLAMA UYARISI",
+      detail: `24 saatlik fırtına olasılığı %${storm24.toFixed(0)}. Transatlantik ve kutup rotaları için alternatif güzergah senaryoları hazırlanmalı.`,
+    });
+  }
+
+  if (kp6h >= 5 && kp < 5) {
+    alarms.push({
+      id: "incoming-activity",
+      level: "warning",
+      title: "YZ TAHMİNİ — 6 SAAT İÇİNDE BOZULMA BEKLENİYOR",
+      detail: `Mevcut Kp=${kp.toFixed(1)} sakin görünse de YZ 6 saat içinde Kp≥${kp6h.toFixed(1)} öngörüyor. Uzun menzilli uçuş planlamacıları şimdiden alternatif rotaları değerlendirmeli.`,
+      routes: "TK 51 (IST-NRT) · TK 1 (IST-JFK) · TK 9 (IST-LAX)",
+    });
+  }
+
+  return alarms;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function AlarmBanner({ alarms }: { alarms: Alarm[] }) {
+  if (alarms.length === 0) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/8 px-4 py-3">
+        <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+        <div>
+          <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest">YZ Alarm: Aktif Tehlike Yok</span>
+          <p className="text-[11px] text-slate-400 mt-0.5">Tüm uzay hava parametreleri havacılık için güvenli seviyelerde. Tüm THY güzergahları normal operasyona uygun.</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {alarms.map(a => (
+        <div
+          key={a.id}
+          className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
+            a.level === "critical"
+              ? "border-red-500/40 bg-red-500/10"
+              : "border-orange-500/40 bg-orange-500/10"
+          }`}
+        >
+          <BellRing className={`w-4 h-4 flex-shrink-0 mt-0.5 ${a.level === "critical" ? "text-red-400" : "text-orange-400"}`} />
+          <div className="flex-1 min-w-0">
+            <div className={`text-xs font-bold uppercase tracking-widest ${a.level === "critical" ? "text-red-400" : "text-orange-400"}`}>
+              {a.title}
+            </div>
+            <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">{a.detail}</p>
+            {a.routes && (
+              <div className="mt-1 text-[10px] text-slate-500">
+                Etkilenen güzergahlar: <span className="text-slate-400 font-mono">{a.routes}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 interface MetricCardProps {
   icon: React.ReactNode;
@@ -92,22 +241,32 @@ function MetricCard({ icon, title, value, unit, level, description, trend }: Met
 }
 
 interface RouteRowProps {
-  route: string;
-  type: string;
+  flightNo: string;
+  origin: string;
+  dest: string;
+  routeType: string;
+  fl: string;
   commStatus: StatusLevel;
   gpsStatus: StatusLevel;
-  radLevel: string;
+  radText: string;
   recommendation: string;
 }
 
-function RouteRow({ route, type, commStatus, gpsStatus, radLevel, recommendation }: RouteRowProps) {
+function RouteRow({ flightNo, origin, dest, routeType, fl, commStatus, gpsStatus, radText, recommendation }: RouteRowProps) {
   const cc = statusColor(commStatus);
   const gc = statusColor(gpsStatus);
+  // overall severity for row highlight
+  const levels: StatusLevel[] = [commStatus, gpsStatus];
+  const worst: StatusLevel = levels.includes("critical") ? "critical"
+    : levels.includes("warning") ? "warning"
+    : levels.includes("caution") ? "caution" : "normal";
+
   return (
-    <tr className="border-b border-slate-700/50 hover:bg-slate-800/40 transition-colors">
+    <tr className={`border-b border-slate-700/40 hover:bg-slate-800/30 transition-colors ${worst === "critical" ? "bg-red-900/10" : worst === "warning" ? "bg-orange-900/8" : ""}`}>
       <td className="py-3 px-4">
-        <div className="font-mono font-semibold text-white text-sm">{route}</div>
-        <div className="text-[10px] text-slate-500 mt-0.5">{type}</div>
+        <div className="font-mono font-bold text-white text-sm">{flightNo}</div>
+        <div className="text-[10px] text-blue-400 mt-0.5">{origin} → {dest}</div>
+        <div className="text-[10px] text-slate-500">{routeType} · {fl}</div>
       </td>
       <td className="py-3 px-4">
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${cc.bg} ${cc.text}`}>
@@ -121,97 +280,153 @@ function RouteRow({ route, type, commStatus, gpsStatus, radLevel, recommendation
           {levelLabel(gpsStatus)}
         </span>
       </td>
-      <td className="py-3 px-4 font-mono text-sm text-slate-300">{radLevel}</td>
-      <td className="py-3 px-4 text-xs text-slate-400 max-w-[180px]">{recommendation}</td>
+      <td className="py-3 px-4 text-xs text-slate-300 font-mono">{radText}</td>
+      <td className="py-3 px-4 text-xs text-slate-400 max-w-[200px] leading-relaxed">{recommendation}</td>
     </tr>
   );
+}
+
+// ── THY Routes ────────────────────────────────────────────────────────────────
+
+function buildRoutes(kp: number, bz: number, xray: number) {
+  const hfLevel:   StatusLevel = kpToLevel(kp, [3, 5, 7]);
+  const gpsLevel:  StatusLevel = bz < -10 ? "warning" : bz < -5 ? "caution" : kpToLevel(kp, [4, 6, 8]);
+  const polarHF:   StatusLevel = kp >= 7 ? "critical" : kp >= 5 ? "warning" : kp >= 3 ? "caution" : "normal";
+  const polarGPS:  StatusLevel = kpToLevel(kp, [4, 6, 8]);
+
+  const radNormal  = kp < 3 ? "Düşük" : kp < 5 ? "Normal" : kp < 7 ? "Orta" : "Yüksek";
+  const radPolar   = kp < 3 ? "Normal" : kp < 5 ? "Orta"   : kp < 7 ? "Yüksek" : "KRİTİK";
+  const radMid     = kp < 4 ? "Düşük" : kp < 6 ? "Normal" : "Orta";
+
+  const hfRec = (level: StatusLevel) =>
+    level === "normal"   ? "Standart operasyon, HF nominal" :
+    level === "caution"  ? "SELCAL monitörü aktif tutun" :
+    level === "warning"  ? "SATCOM yedek aktif edin, HF izle" :
+                           "HF kullanmayın, yalnızca SATCOM";
+
+  const gpsRec = (gl: StatusLevel) =>
+    gl === "normal"   ? "" :
+    gl === "caution"  ? "GPS drift takibi, ILS yedek hazır" :
+    gl === "warning"  ? "RNP AR iptal, BARO-VNAV zorunlu" :
+                        "GPS GÜVENİLMEZ — ILS / BARO zorunlu";
+
+  const mergeRec = (h: StatusLevel, g: StatusLevel) => {
+    const r: string[] = [];
+    const hr = hfRec(h); if (hr) r.push(hr);
+    const gr = gpsRec(g); if (gr) r.push(gr);
+    return r.length ? r.join("; ") : "Tüm sistemler nominal";
+  };
+
+  return [
+    { flightNo: "TK 1",  origin: "IST", dest: "JFK", routeType: "Kuzey Atlantik NAT-A", fl: "FL350-FL370", commStatus: hfLevel,  gpsStatus: gpsLevel, radText: radNormal, recommendation: mergeRec(hfLevel, gpsLevel)  },
+    { flightNo: "TK 5",  origin: "IST", dest: "ORD", routeType: "Kuzey Atlantik NAT-B", fl: "FL360",       commStatus: hfLevel,  gpsStatus: gpsLevel, radText: radNormal, recommendation: mergeRec(hfLevel, gpsLevel)  },
+    { flightNo: "TK 51", origin: "IST", dest: "NRT", routeType: "Sibirya / Polar",       fl: "FL380",       commStatus: polarHF, gpsStatus: polarGPS, radText: radPolar,  recommendation: mergeRec(polarHF, polarGPS)  },
+    { flightNo: "TK 9",  origin: "IST", dest: "LAX", routeType: "Kuzey Pasifik PACOTS",  fl: "FL370-FL390", commStatus: kp > 4 ? "caution" as StatusLevel : "normal",  gpsStatus: gpsLevel, radText: radMid,    recommendation: mergeRec(kp > 4 ? "caution" : "normal", gpsLevel) },
+    { flightNo: "TK 15", origin: "IST", dest: "GRU", routeType: "Atlantik Güney",        fl: "FL350",       commStatus: hfLevel === "critical" ? "warning" as StatusLevel : hfLevel === "warning" ? "caution" as StatusLevel : "normal", gpsStatus: "normal" as StatusLevel, radText: "Düşük",      recommendation: "Afrika + Güney Atlantik segment, düşük etki" },
+    { flightNo: "TK 53", origin: "IST", dest: "JNB", routeType: "Afrika Rotası",         fl: "FL360",       commStatus: "normal" as StatusLevel, gpsStatus: "normal" as StatusLevel, radText: "Düşük",      recommendation: "VHF kapsama alanı yeterli, etkilenme minimal"  },
+  ];
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AviationPage() {
   const [, navigate] = useLocation();
+  const [clock, setClock] = useState(turkeyTime());
+
   const { data: current } = useGetCurrentSpaceWeather({ refetchInterval: 60000 });
   const { data: pred }    = useGetAIPrediction({ refetchInterval: 60000 });
   const { data: risk }    = useGetInfrastructureRisk({ refetchInterval: 60000 });
   const { data: hist }    = useGetSpaceWeatherHistory({ refetchInterval: 60000 });
 
-  const kp    = current?.kpIndex ?? 0;
-  const bz    = current?.solarWind?.bz ?? 0;
-  const speed = current?.solarWind?.speed ?? 400;
-  const xray  = current?.xrayFlux?.current ?? 0;
+  // Live clock (TRT = UTC+3)
+  useEffect(() => {
+    const t = setInterval(() => setClock(turkeyTime()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const kp     = current?.kpIndex ?? 0;
+  const bz     = current?.solarWind?.bz ?? 0;
+  const speed  = current?.solarWind?.speed ?? 400;
+  const xray   = current?.xrayFlux?.current ?? 0;
   const avRisk = risk?.aviation ?? 0;
 
-  // Derived aviation metrics
-  const hfLevel:  StatusLevel = kpToLevel(kp, [3, 5, 7]);
-  const gpsLevel: StatusLevel = bz < -10 ? "warning" : bz < -5 ? "caution" : kpToLevel(kp, [4, 6, 8]);
-  const radLevel: StatusLevel = kpToLevel(kp, [4, 6, 8]);
+  // Metric levels derived from real NOAA data
+  const hfLevel:    StatusLevel = kpToLevel(kp, [3, 5, 7]);
+  const gpsLevel:   StatusLevel = bz < -10 ? "warning" : bz < -5 ? "caution" : kpToLevel(kp, [4, 6, 8]);
+  const radLevel:   StatusLevel = kpToLevel(kp, [4, 6, 8]);
   const polarLevel: StatusLevel = kp >= 7 ? "critical" : kp >= 5 ? "warning" : kp >= 3 ? "caution" : "normal";
 
-  const hfDesc  = hfLevel === "normal"
-    ? "HF iletişim kanalları nominal. Okyanus geçiş güzergahlarında normal operasyon bekleniyor."
-    : hfLevel === "caution"
-    ? "HF bozulma riski artıyor. Yedek iletişim kanallarını hazır tutun."
-    : hfLevel === "warning"
-    ? "HF iletişimde kısmi kesintiler mümkün. SELCAL ve SATCOM'u aktif edin."
-    : "Okyanus güzergahlarında HF kesintisi yüksek olasılıklı. SATCOM zorunlu.";
+  const hfDesc = {
+    normal:   "HF kanalları nominal. NAT ve PACOTS güzergahlarında standart haberleşme sürdürülebilir.",
+    caution:  "Kp artışı HF kalitesini etkiliyor. SELCAL monitörü aktif, SATCOM yedek hazır olmalı.",
+    warning:  "HF sönümlenmesi başladı. Okyanus geçişlerinde SATCOM'u birincil kanal olarak kullanın.",
+    critical: "HF blackout riski kritik. SELCAL yetersiz kalabilir. Yalnızca SATCOM ile devam edin.",
+  }[hfLevel];
 
-  const gpsDesc = gpsLevel === "normal"
-    ? "GPS/GNSS sinyalleri nominal. RNP yaklaşım prosedürleri etkilenmez."
-    : gpsLevel === "caution"
-    ? "Hafif iyonosferik bozulma. ILS yedekleme prosedürlerini gözden geçirin."
-    : "GPS doğruluğu düşük. RNP AR prosedürleri kısıtlanabilir, BARO-VNAV öncelikli.";
+  const gpsDesc = {
+    normal:   "GPS/GNSS tam hassasiyette. RNP AR ve RNP 0.1 prosedürleri güvenle uygulanabilir.",
+    caution:  "İyonosferik bozulma başladı. GPS hatası ±5-10 m arası artabilir. ILS yedekleme aktif edin.",
+    warning:  "GPS doğruluğu güvenilir değil. RNP AR prosedürleri kısıtlı; BARO-VNAV ve ILS zorunlu.",
+    critical: "GPS/GNSS kullanılamaz. Tüm RNAV/RNP prosedürleri iptal. ILS / BARO-VNAV ile devam edin.",
+  }[gpsLevel];
 
-  const radDesc = radLevel === "normal"
-    ? "Kutup rotalarında radyasyon dozu normal seviyede. Kısıtlama gerekmez."
-    : radLevel === "caution"
-    ? "Yüksek irtifa kutup rotalarında hafif radyasyon artışı. Mürettebat maruziyetini takip edin."
-    : "Kutup rotası radyasyon dozu arttı. Daha güney güzergah değerlendirmesi önerilir.";
+  const radDesc = {
+    normal:   "Kutup rotası radyasyon dozu ICRP sınırları içinde. Ekstra kısıtlama gerekmez.",
+    caution:  "Yüksek irtifa kutup rotalarında doz artışı. Mürettebat maruziyeti takip edilmeli.",
+    warning:  "Radyasyon dozu artıyor. IATA rehberi doğrultusunda daha güney rota değerlendirin.",
+    critical: "Kutup rotasında radyasyon kritik seviyede. Transpolar uçuş derhal güneye yönlendirilmeli.",
+  }[radLevel];
 
-  const polarDesc = polarLevel === "normal"
-    ? "Transpolar güzergahlar açık. Kp düşük, kutup rotası kullanımı serbesttir."
-    : polarLevel === "caution"
-    ? "Kutup güzergahı yakından izleniyor. Alternatif güzergah planı hazır olsun."
-    : polarLevel === "warning"
-    ? "Kutup güzergahında operasyonel kısıtlamalar. ICAO Özel Prosedür gerekebilir."
-    : "Kutup güzergahı kapatma eşiğinde. Tüm transpolar uçuşlar güneye yönlendirilmeli.";
+  const polarDesc = {
+    normal:   "Transpolar güzergah açık. Kp eşiği aşılmamış, kutup rotası serbesttir.",
+    caution:  "Kutup güzergahı takipte. Kp artışı durumunda hızlı güzergah değişimine hazır olun.",
+    warning:  "Kutup rota kısıtlamaları uygulanıyor. Operatörler alternatif güney güzergahı tercih etmeli.",
+    critical: "Kutup güzergahı kapatıldı. Kp≥7 — tüm transpolar uçuşlar güney rotalara yönlendirilmeli.",
+  }[polarLevel];
 
   // AI outlook
-  const kp1h  = pred?.predictions?.kp1h  ?? kp;
-  const kp3h  = pred?.predictions?.kp3h  ?? kp;
-  const kp6h  = pred?.predictions?.kp6h  ?? kp;
-  const aiConf = pred?.confidence ?? 91;
-  const storm24 = (pred?.stormProbability24h ?? 0);
+  const kp1h    = pred?.predictions?.kp1h  ?? kp;
+  const kp3h    = pred?.predictions?.kp3h  ?? kp;
+  const kp6h    = pred?.predictions?.kp6h  ?? kp;
+  const aiConf  = pred?.confidence ?? 91.4;
+  const storm24 = pred?.stormProbability24h ?? 0;
 
   const outlook1h: StatusLevel = kpToLevel(kp1h, [3, 5, 7]);
   const outlook6h: StatusLevel = kpToLevel(kp6h, [3, 5, 7]);
 
-  const outlookText = kp6h < 3
-    ? "Önümüzdeki 6 saat için uzay hava koşulları sakin kalması bekleniyor. Tüm havacılık operasyonları normal şekilde sürdürülebilir."
-    : kp6h < 5
-    ? "Orta düzey aktivite bekleniyor. HF iletişim kalitesi hafifçe düşebilir; okyanus geçişlerinde SELCAL monitörü aktif tutulmalı."
-    : kp6h < 7
-    ? "Güçlü jeomagnetik aktivite bekleniyor. Kutup güzergahları için alternatif plan hazırlayın; HF iletişimi kesintili olabilir."
-    : "Şiddetli jeomagnetik fırtına riski yüksek. Transpolar güzergah kullanmayın; SATCOM birincil iletişim kanalı olarak kullanın.";
+  const outlookText =
+    kp6h < 3  ? "Önümüzdeki 6 saat sakin. Tüm THY güzergahlarında standart operasyon sürdürülebilir. HF ve GPS etkilenmez." :
+    kp6h < 5  ? `YZ modeli ${kp6h.toFixed(1)} Kp öngörüyor. NAT güzergahlarında HF kalitesi hafif düşebilir; transatlantik uçuşlarda SELCAL monitörü aktif tutulmalı.` :
+    kp6h < 7  ? `${kp6h.toFixed(1)} Kp tahmin ediliyor — güçlü aktivite. TK 51 (IST-NRT) polar rotası için alternatif hazırlayın. TK 1 ve TK 5'te HF bozulması bekleniyor.` :
+                `Şiddetli fırtına riski — Kp ${kp6h.toFixed(1)}. TK 51 polar rotası kapatılmalı. Tüm transatlantik uçuşlarda SATCOM zorunlu. Acil uçuş planı revizyonu öneririz.`;
 
-  // Chart data
+  // AI alarms from real data
+  const alarms = useMemo(
+    () => buildAlarms(kp, bz, xray, storm24, kp6h),
+    [kp, bz, xray, storm24, kp6h]
+  );
+
+  // THY routes
+  const routes = useMemo(() => buildRoutes(kp, bz, xray), [kp, bz, xray]);
+
+  // Chart data from real history
   const chartData = useMemo(() => {
     if (!hist?.history?.length) return [];
     return hist.history.slice(-24).map((h, i) => ({
-      t: i,
-      kp: h.kpIndex ?? 0,
-      hfRisk: Math.min(100, (h.kpIndex ?? 0) * 14),
-      gpsRisk: Math.min(100, avRisk + (h.kpIndex ?? 0) * 3),
+      label: `-${24 - i}s`,
+      hfRisk:  Math.min(100, Math.round((h.kpIndex ?? 0) * 14)),
+      gpsRisk: Math.min(100, Math.round(avRisk + (h.kpIndex ?? 0) * 3)),
+      kp:      h.kpIndex ?? 0,
     }));
   }, [hist, avRisk]);
 
-  const now = new Date();
-  const utcStr = now.toUTCString().slice(17, 25) + " UTC";
+  const alarmCount = alarms.length;
 
   return (
     <div className="min-h-screen bg-[#07111f] text-white font-sans">
-      {/* Top navigation bar */}
-      <header className="border-b border-slate-700/60 bg-[#0a1628]/90 backdrop-blur-sm sticky top-0 z-50">
+
+      {/* Header */}
+      <header className="border-b border-slate-700/60 bg-[#0a1628]/95 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center gap-4">
           <button
             onClick={() => navigate("/")}
@@ -220,40 +435,57 @@ export default function AviationPage() {
             <ArrowLeft className="w-4 h-4" />
             Ana Panel
           </button>
-          <div className="h-4 w-px bg-slate-600" />
+          <div className="h-4 w-px bg-slate-700" />
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
               <Plane className="w-4 h-4 text-white" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white leading-none">Havacılık Uzay Hava Paneli</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Space Weather Aviation Intelligence</div>
+              <div className="text-sm font-bold text-white leading-none">THY Havacılık Uzay Hava Paneli</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">Türk Hava Yolları · Space Weather Operations</div>
             </div>
           </div>
-          <div className="ml-auto flex items-center gap-6">
+          <div className="ml-auto flex items-center gap-5">
+            {alarmCount > 0 && (
+              <div className="flex items-center gap-1.5 text-xs font-bold text-red-400 border border-red-500/40 bg-red-500/10 px-3 py-1 rounded-full">
+                <BellRing className="w-3.5 h-3.5" />
+                {alarmCount} AKTİF ALARM
+              </div>
+            )}
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-slate-400">Canlı Veri</span>
+              <span className="text-xs text-slate-400">NOAA Canlı</span>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <Clock className="w-3.5 h-3.5" />
-              {utcStr}
+            <div className="flex items-center gap-1.5 text-xs text-slate-300 font-mono">
+              <Clock className="w-3.5 h-3.5 text-slate-500" />
+              {clock}
             </div>
             <div className="text-xs bg-blue-600/20 border border-blue-500/30 text-blue-400 px-3 py-1 rounded-full font-semibold">
-              YZ %{aiConf.toFixed(0)} Doğruluk
+              YZ %{aiConf.toFixed(1)} Doğruluk
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-6 flex flex-col gap-6">
+      <main className="max-w-7xl mx-auto px-6 py-6 flex flex-col gap-5">
 
-        {/* Section: Current Status */}
+        {/* AI Alarm Banner */}
         <section>
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Bell className="w-3.5 h-3.5 text-slate-400" />
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">YZ Tehlike Alarmları</h2>
+            <div className="flex-1 h-px bg-slate-700/50" />
+            <span className="text-[10px] text-slate-600">Kp {kp.toFixed(1)} · Bz {bz.toFixed(1)} nT · X-ışını: {current?.xrayFlux?.classLabel ?? "B"}</span>
+          </div>
+          <AlarmBanner alarms={alarms} />
+        </section>
+
+        {/* Metric Cards */}
+        <section>
+          <div className="flex items-center gap-2 mb-3">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Anlık Etki Analizi</h2>
             <div className="flex-1 h-px bg-slate-700/50" />
-            <span className="text-[10px] text-slate-500">Kp {kp.toFixed(1)} · Bz {bz.toFixed(1)} nT · {speed} km/s</span>
+            <span className="text-[10px] text-slate-500">Güneş rüzgarı: {speed} km/s · Yoğunluk: {current?.solarWind?.density?.toFixed(1) ?? "—"} p/cm³</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <MetricCard
@@ -273,9 +505,9 @@ export default function AviationPage() {
             />
             <MetricCard
               icon={<ShieldAlert className="w-4 h-4" />}
-              title="Radyasyon Seviyesi"
+              title="Radyasyon Riski"
               value={avRisk.toFixed(0)}
-              unit="Birim Risk"
+              unit="Birim"
               level={radLevel}
               description={radDesc}
             />
@@ -289,25 +521,23 @@ export default function AviationPage() {
           </div>
         </section>
 
-        {/* Section: AI Outlook + Route Table */}
+        {/* AI Outlook + Route Table */}
         <section className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
-          {/* AI Outlook */}
+          {/* AI Outlook Panel */}
           <div className="lg:col-span-2 rounded-xl border border-slate-700/50 bg-[#0c1e35] p-5 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Zap className="w-4 h-4 text-blue-400" />
                 <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">YZ Etki Tahmini</span>
               </div>
-              <span className="text-[10px] text-slate-500 border border-slate-700 rounded px-2 py-0.5">%{aiConf.toFixed(0)} güven</span>
+              <span className="text-[10px] text-slate-500 border border-slate-700 rounded px-2 py-0.5">%{aiConf.toFixed(1)} güven</span>
             </div>
 
-            {/* 6h outlook text */}
             <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/40">
               <p className="text-sm text-slate-300 leading-relaxed">{outlookText}</p>
             </div>
 
-            {/* Hour-by-hour KP forecast */}
             <div className="grid grid-cols-3 gap-2">
               {[
                 { label: "1 Saat", kpVal: kp1h, level: outlook1h },
@@ -325,97 +555,64 @@ export default function AviationPage() {
               })}
             </div>
 
-            {/* 24h storm probability */}
             <div className="rounded-lg border border-slate-700/40 bg-slate-800/30 p-3">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xs text-slate-400">Fırtına Olasılığı (24s)</span>
-                <span className={`text-sm font-bold ${storm24 > 40 ? "text-orange-400" : storm24 > 20 ? "text-amber-400" : "text-emerald-400"}`}>
+                <span className={`text-sm font-bold ${storm24 > 40 ? "text-red-400" : storm24 > 20 ? "text-amber-400" : "text-emerald-400"}`}>
                   %{storm24.toFixed(0)}
                 </span>
               </div>
               <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all ${storm24 > 40 ? "bg-orange-500" : storm24 > 20 ? "bg-amber-500" : "bg-emerald-500"}`}
+                  className={`h-full rounded-full transition-all ${storm24 > 40 ? "bg-red-500" : storm24 > 20 ? "bg-amber-500" : "bg-emerald-500"}`}
                   style={{ width: `${Math.min(100, storm24)}%` }}
                 />
               </div>
             </div>
 
-            {/* X-Ray class */}
-            <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-800/30 rounded-lg px-3 py-2 border border-slate-700/40">
-              <span>X-Işını Sınıfı</span>
-              <span className={`font-bold font-mono ${xray > 1e-4 ? "text-red-400" : xray > 1e-5 ? "text-orange-400" : "text-emerald-400"}`}>
-                {current?.xrayFlux?.classLabel ?? "B"}
-              </span>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-800/30 rounded-lg px-3 py-2 border border-slate-700/40">
+                <span>X-Işını</span>
+                <span className={`font-bold font-mono ${xray >= 1e-4 ? "text-red-400" : xray >= 1e-5 ? "text-orange-400" : "text-emerald-400"}`}>
+                  {current?.xrayFlux?.classLabel ?? "B"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-800/30 rounded-lg px-3 py-2 border border-slate-700/40">
+                <span>Bz Alanı</span>
+                <span className={`font-bold font-mono ${bz < -10 ? "text-red-400" : bz < -5 ? "text-amber-400" : "text-emerald-400"}`}>
+                  {bz.toFixed(1)} nT
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Route table */}
+          {/* THY Route Table */}
           <div className="lg:col-span-3 rounded-xl border border-slate-700/50 bg-[#0c1e35] overflow-hidden">
             <div className="px-5 py-3.5 border-b border-slate-700/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Plane className="w-4 h-4 text-blue-400" />
-                <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">Kritik Güzergah Durumu</span>
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">THY Güzergah Durumu</span>
               </div>
-              <span className="text-[10px] text-slate-500">Gerçek zamanlı · YZ hesaplı</span>
+              <span className="text-[10px] text-slate-500">Gerçek zamanlı NOAA verisi · YZ hesaplı</span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-700/50">
-                    {["Güzergah", "HF İletişim", "GPS", "Radyasyon", "Öneri"].map(h => (
-                      <th key={h} className="py-2 px-4 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
+                    {["Sefer", "HF İletişim", "GPS", "Radyasyon", "Operasyonel Öneri"].map(h => (
+                      <th key={h} className="py-2.5 px-4 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/50">
-                  <RouteRow
-                    route="NAT Track"
-                    type="Kuzey Atlantik · FL350"
-                    commStatus={hfLevel}
-                    gpsStatus={gpsLevel}
-                    radLevel={radLevel === "normal" ? "Normal" : radLevel === "caution" ? "Orta" : "Yüksek"}
-                    recommendation={hfLevel === "normal" ? "Standart operasyon" : "SELCAL monitor aktif"}
-                  />
-                  <RouteRow
-                    route="Polar 1"
-                    type="Kuzey Kutbu · FL380"
-                    commStatus={polarLevel === "normal" ? "normal" : polarLevel === "caution" ? "caution" : "critical"}
-                    gpsStatus={gpsLevel}
-                    radLevel={kp > 5 ? "Yüksek" : kp > 3 ? "Orta" : "Normal"}
-                    recommendation={polarLevel === "normal" ? "Açık, kısıtsız" : polarLevel === "caution" ? "İzle, seçenek hazırla" : "Güney güzergah kullan"}
-                  />
-                  <RouteRow
-                    route="PACOTS"
-                    type="Kuzey Pasifik · FL390"
-                    commStatus={kp > 4 ? "caution" : "normal"}
-                    gpsStatus={gpsLevel}
-                    radLevel="Normal"
-                    recommendation={kp > 4 ? "HF yedek hazır tut" : "Standart operasyon"}
-                  />
-                  <RouteRow
-                    route="ATS-L888"
-                    type="Pasifik Güney · FL360"
-                    commStatus="normal"
-                    gpsStatus="normal"
-                    radLevel="Düşük"
-                    recommendation="Tüm sistemler nominal"
-                  />
-                  <RouteRow
-                    route="Eurocontrol"
-                    type="Avrupa NAM · FL340"
-                    commStatus={kp > 5 ? "caution" : "normal"}
-                    gpsStatus={bz < -8 ? "caution" : "normal"}
-                    radLevel="Normal"
-                    recommendation={kp > 5 ? "GPS drift izle" : "Normal prosedür"}
-                  />
+                <tbody>
+                  {routes.map(r => <RouteRow key={r.flightNo} {...r} />)}
                 </tbody>
               </table>
             </div>
           </div>
         </section>
 
-        {/* Section: 24h Trend Chart */}
+        {/* 24h Trend Chart */}
         <section className="rounded-xl border border-slate-700/50 bg-[#0c1e35] p-5">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -423,31 +620,30 @@ export default function AviationPage() {
               <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">Son 24 Saat — Havacılık Etki Trendi</span>
             </div>
             <div className="flex items-center gap-4 text-[10px] text-slate-500">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-400 inline-block" /> HF Risk %</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-amber-400 inline-block" /> GPS Risk %</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-slate-500 inline-block border-dashed border-t" /> Eşik (Kp=5)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-400 inline-block rounded" /> HF Risk %</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-amber-400 inline-block rounded" /> GPS Risk %</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-red-500 inline-block rounded opacity-60" style={{ borderTop: "2px dashed" }} /> Uyarı Eşiği (%70)</span>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="t" tick={false} axisLine={false} tickLine={false} />
+              <XAxis dataKey="label" tick={{ fill: "#475569", fontSize: 9 }} axisLine={false} tickLine={false} interval={3} />
               <YAxis domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 10 }} axisLine={false} tickLine={false} />
               <Tooltip
                 contentStyle={{ background: "#0a1628", border: "1px solid #334155", borderRadius: 8, fontSize: 11 }}
                 labelStyle={{ color: "#94a3b8" }}
                 itemStyle={{ color: "#e2e8f0" }}
               />
-              <ReferenceLine y={70} stroke="#f97316" strokeDasharray="4 2" strokeWidth={1} />
+              <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="4 2" strokeWidth={1} label={{ value: "Uyarı", fill: "#ef4444", fontSize: 9, position: "insideTopRight" }} />
               <Line type="monotone" dataKey="hfRisk"  stroke="#60a5fa" strokeWidth={2} dot={false} name="HF Risk %" />
               <Line type="monotone" dataKey="gpsRisk" stroke="#fbbf24" strokeWidth={2} dot={false} name="GPS Risk %" />
             </LineChart>
           </ResponsiveContainer>
         </section>
 
-        {/* Footer */}
         <footer className="text-center text-[10px] text-slate-600 pb-2">
-          Yörünge Kalkanı Yapay Zeka · Havacılık Modülü · Veriler NOAA/SWPC kaynaklı · YZ destekli analiz
+          Yörünge Kalkanı Yapay Zeka · THY Havacılık Modülü · Veriler NOAA/SWPC kaynaklı · YZ destekli analiz
         </footer>
 
       </main>
