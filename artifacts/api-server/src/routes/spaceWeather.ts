@@ -356,68 +356,81 @@ const TR_Age = 25 / 40;      // 25 yıl / 40 yıl
 const A_GRID = parseFloat((0.4 * TR_H + 0.3 * TR_V + 0.3 * TR_Age).toFixed(4)); // ≈ 0.9445
 
 function calcRiskValues(
-  kp: number, bz: number, speed: number, _xrayFlux: number, dst: number,
-  protonFlux10: number = 0.1, dBdt: number = 0, G: number = 0.8
+  kp: number, bz: number, speed: number, xrayFlux: number, dst: number,
+  protonFlux10: number = 0.1, dBdt: number = 0, G: number = 0.8,
+  density: number = 5.0
 ): RiskValues {
-  // Sanitize all inputs — NaN or ±Infinity must never reach the formula
-  const safeVal = (v: number, fallback: number) => (isFinite(v) ? v : fallback);
-  kp           = safeVal(kp, 2.3);
-  bz           = safeVal(bz, -2);
-  speed        = safeVal(speed, 450);
-  dst          = safeVal(dst, -15);
-  protonFlux10 = safeVal(protonFlux10, 0.1);
-  dBdt         = safeVal(dBdt, 0);
-  G            = safeVal(G, 0.8);
+  // Sanitize — NaN / ±Infinity must never reach the formula
+  const safe = (v: number, fb: number) => (isFinite(v) ? v : fb);
+  kp           = safe(kp, 2.3);
+  bz           = safe(bz, -2);
+  speed        = safe(speed, 450);
+  xrayFlux     = safe(xrayFlux, 1e-8);
+  dst          = safe(dst, -15);
+  protonFlux10 = safe(protonFlux10, 0.1);
+  dBdt         = safe(dBdt, 0);
+  G            = safe(G, 0.8);
+  density      = safe(density, 5.0);
 
-  // ── 1. Normalize parametreler (0–1) ─────────────────────────────────────
-  const Kp_n   = Math.min(1, Math.max(0, kp / 9));
-  const Dst_n  = Math.min(1, Math.max(0, Math.abs(dst) / 500));
-  const dBdt_n = Math.min(1, Math.max(0, Math.abs(dBdt) / 1000));
-  const V_n    = Math.min(1, Math.max(0, speed / 1000));
-  const Bz_n   = Math.min(1, Math.max(0, (-bz) / 30));   // Güney Bz → enerji girişi
-  const P_n    = Math.min(1, Math.max(0, protonFlux10 / 100));
+  const clampN = (v: number) => Math.min(1, Math.max(0, v));
+  const clamp  = (v: number) => Math.round(Math.min(100, Math.max(0, v)));
 
-  // ── 2. Uzay hava şiddeti skoru S (Σ ağırlık = 1.00) ─────────────────────
-  const S = 0.18 * Kp_n + 0.22 * Dst_n + 0.30 * dBdt_n + 0.12 * V_n + 0.10 * Bz_n + 0.08 * P_n;
+  // ── 1. Fiziksel normalleştirme (0–1) ────────────────────────────────────
+  const Kp_n   = clampN(kp / 9);                        // 0–9 → 0–1
+  const Dst_n  = clampN(Math.abs(dst) / 300);           // ciddi fırtına -300 nT
+  const Bz_n   = clampN((-bz) / 25);                    // güney Bz, -25 nT limit
+  const V_n    = clampN((speed - 300) / 700);           // anlamlı aralık 300–1000 km/s
+  const P_n    = clampN(protonFlux10 / 1000);           // S3 fırtınası = 1000 pfu
+  const X_n    = clampN(xrayFlux / 1e-4);               // X10 sınıfı = 1.0
+  const dBdt_n = clampN(Math.abs(dBdt) / 50);          // 50 nT/dk = ekstrem
+  // Dinamik basınç Pd (nPa) = 1.67e-6 × n × v²; normalize to 20 nPa
+  const Pd_n   = clampN(1.67e-6 * density * speed * speed / 20);
 
-  // ── 3. Kategori-özel risk formülleri R = 100 × f(S,P_n,Kp_n,Bz_n) × G × A ─
-  const clamp = (v: number) => Math.round(Math.min(100, Math.max(0, v)));
+  // ── 2. Genel şiddet skoru S (ağırlık toplamı = 1.00) ───────────────────
+  // dBdt yerine Pd_n: dinamik basınç daha tutarlı sinyal
+  const S = 0.25*Kp_n + 0.20*Dst_n + 0.20*Bz_n + 0.15*V_n + 0.12*P_n + 0.08*X_n;
 
-  // Elektrik şebekesi: R_grid = 100 × S × G × A_grid → sigmoid dönüşümü
-  const R_grid_raw = 100 * S * G * A_GRID;
-  const R_grid = clamp(100 / (1 + Math.exp(-0.08 * (R_grid_raw - 50))));  // lojistik
+  // ── 3. Kategori-özel fizik bazlı formüller ──────────────────────────────
 
-  // Uydu: R_sat = 100 × (0.5S + 0.5P_n) × G × A=0.9
-  const R_sat  = clamp(100 * (0.5 * S + 0.5 * P_n) * G * 0.9);
+  // GPS/GNSS: iyonosferik scintillasyon — Kp, güney Bz, X-ışını, hız
+  const R_gps = clamp(100 * (0.35*Kp_n + 0.30*Bz_n + 0.25*X_n + 0.10*V_n) * G * 0.85);
 
-  // GPS / Haberleşme: R_comm = 100 × (0.4Kp_n + 0.3Bz_n + 0.3P_n) × G × A=0.8
-  const R_comm = clamp(100 * (0.4 * Kp_n + 0.3 * Bz_n + 0.3 * P_n) * G * 0.8);
+  // HF Radyo: iyonosferik emilim — X-ışını kritik (D-tabakası), sonra Kp
+  const R_hf  = clamp(100 * (0.45*X_n + 0.35*Kp_n + 0.15*Bz_n + 0.05*P_n) * G * 0.85);
 
-  // Boru hattı: R = 100 × S × G × A=0.7
-  const R_pipe = clamp(100 * S * G * 0.7);
+  // Uydu: radyasyon + yüzey şarjı — proton akısı birincil
+  const R_sat = clamp(100 * (0.45*P_n + 0.30*Kp_n + 0.15*Dst_n + 0.10*Bz_n) * G * 0.90);
 
-  // Havacılık: R = 100 × S × G × A=0.9
-  const R_avia = clamp(100 * S * G * 0.9);
+  // Elektrik şebekesi: GIC — Dst (halka akımı), dBdt, Kp  → sigmoid
+  const R_grid_raw = 100 * (0.40*Dst_n + 0.35*dBdt_n + 0.25*Kp_n) * G * A_GRID;
+  // sigmoid merkezi 35'te, k=0.12 → sessiz ~%2, G3 ~%65, G5 ~%97
+  const R_grid = clamp(100 / (1 + Math.exp(-0.12 * (R_grid_raw - 35))));
 
-  // İnsan sağlığı: R = 100 × S × G × A=0.8
-  const R_hlth = clamp(100 * S * G * 0.8);
+  // Havacılık: polar HF + GPS + radyasyon — X-ışını, Kp, proton
+  const R_avia = clamp(100 * (0.30*X_n + 0.30*Kp_n + 0.25*P_n + 0.15*Bz_n) * G * 0.90);
 
-  // İnternet altyapısı: R = 100 × S × G × A=0.9
-  const R_net  = clamp(100 * S * G * 0.9);
+  // Boru hattı: indüklenmiş akımlar — Dst, Kp, Bz; halka akımından daha az etkilenir
+  const R_pipe = clamp(100 * (0.45*Dst_n + 0.35*Kp_n + 0.20*Bz_n) * G * 0.70);
 
-  // Genel referans: A=1.0
-  const R_all  = clamp(100 * S * G * 1.0);
+  // İnsan sağlığı: radyasyon + kardiyak etkiler — proton, Kp, Dst
+  const R_hlth = clamp(100 * (0.40*P_n + 0.35*Kp_n + 0.15*Dst_n + 0.10*Bz_n) * G * 0.75);
+
+  // İnternet altyapısı: uydu + denizaltı kablo GIC — Kp, Dst, proton
+  const R_net  = clamp(100 * (0.35*Kp_n + 0.30*Dst_n + 0.25*P_n + 0.10*Bz_n) * G * 0.85);
+
+  // Genel risk: S × G × 1.0
+  const R_all  = clamp(100 * S * G);
 
   return {
-    gpsGnss:      R_comm,   // GPS/HF: 0.4Kp+0.3Bz↓+0.3P, A=0.8
-    satelliteOps: R_sat,    // Uydu: 0.5S+0.5P, A=0.9
-    powerGrid:    R_grid,   // Elektrik: S×G×A_grid + sigmoid
-    hfRadio:      R_comm,   // HF Radyo: GPS formülü, A=0.8
-    aviation:     R_avia,   // Havacılık: S×G, A=0.9
-    humanHealth:  R_hlth,   // İnsan Sağlığı: S×G, A=0.8
-    pipelines:    R_pipe,   // Boru Hatları: S×G, A=0.7
-    internet:     R_net,    // İnternet: S×G, A=0.9
-    overallRisk:  R_all,    // Genel: S×G, A=1.0
+    gpsGnss:      R_gps,   // iyonosferik scintillasyon: 0.35Kp+0.30Bz+0.25X+0.10V
+    satelliteOps: R_sat,   // radyasyon + şarj: 0.45P+0.30Kp+0.15Dst+0.10Bz
+    powerGrid:    R_grid,  // GIC sigmoid: 0.40Dst+0.35dBdt+0.25Kp, merkez=35
+    hfRadio:      R_hf,    // iyonosferik emilim: 0.45X+0.35Kp+0.15Bz+0.05P
+    aviation:     R_avia,  // polar HF+GPS+rad: 0.30X+0.30Kp+0.25P+0.15Bz
+    humanHealth:  R_hlth,  // radyasyon+kardiyak: 0.40P+0.35Kp+0.15Dst+0.10Bz
+    pipelines:    R_pipe,  // GIC boru: 0.45Dst+0.35Kp+0.20Bz
+    internet:     R_net,   // kablo+uydu: 0.35Kp+0.30Dst+0.25P+0.10Bz
+    overallRisk:  R_all,   // S×G genel
   };
 }
 
@@ -696,11 +709,12 @@ router.get("/infrastructure-risk", async (_req, res) => {
   })();
 
   // Guard all inputs against NaN/Infinity before passing to formula
-  const safeKp     = isFinite(kp)    && kp >= 0   ? kp    : 2.3;
-  const safeBz     = isFinite(bz)                 ? bz    : -2;
-  const safeDst    = isFinite(dst)                ? dst   : -15;
-  const safeSpeed  = isFinite(speed) && speed > 0 ? speed : 450;
-  const safeProton = isFinite(protonFlux10) && protonFlux10 > 0 ? protonFlux10 : 0.1;
+  const safeKp      = isFinite(kp)      && kp >= 0      ? kp      : 2.3;
+  const safeBz      = isFinite(bz)                      ? bz      : -2;
+  const safeDst     = isFinite(dst)                     ? dst     : -15;
+  const safeSpeed   = isFinite(speed)   && speed > 0    ? speed   : 450;
+  const safeDensity = isFinite(density) && density >= 0 ? density : 5.0;
+  const safeProton  = isFinite(protonFlux10) && protonFlux10 > 0 ? protonFlux10 : 0.1;
 
   // G = L × C × T hesapla (Türkiye, dinamik yerel saat)
   const G_now = turkeyG(0);   // şimdiki saat
@@ -708,8 +722,8 @@ router.get("/infrastructure-risk", async (_req, res) => {
   const G_3h  = turkeyG(3);   // 3 saat sonrası
   const T_now = turkeyT(0);
 
-  // Current risk using full R = 100 × S × G × A model
-  const current = calcRiskValues(safeKp, safeBz, safeSpeed, xrayFlux, safeDst, safeProton, dBdt, G_now);
+  // Current risk using full R = 100 × fizik bazlı kategori formülleri × G model
+  const current = calcRiskValues(safeKp, safeBz, safeSpeed, xrayFlux, safeDst, safeProton, dBdt, G_now, safeDensity);
 
   // AI-predicted risk for 1h and 3h using predicted Kp/conditions + future G
   const pred = aiPredict({ kp, bz, speed, density, temp, xrayFlux, bt, dst });
@@ -726,7 +740,8 @@ router.get("/infrastructure-risk", async (_req, res) => {
     safeDst * bzFactor1h,
     safeProton,
     dBdt * bzFactor1h,
-    G_1h
+    G_1h,
+    safeDensity
   );
   const predicted3h = calcRiskValues(
     pred.kp3h,
@@ -736,7 +751,8 @@ router.get("/infrastructure-risk", async (_req, res) => {
     safeDst * (bzFactor1h * 0.9 + 0.1),
     safeProton,
     dBdt * 0.7,
-    G_3h
+    G_3h,
+    safeDensity
   );
 
   // Determine trend

@@ -1181,15 +1181,15 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
       {/* Formül notu */}
       <div className="mt-2 space-y-0.5">
         <div className="text-[8px] font-mono text-muted-foreground/35 leading-relaxed">
-          R = 100·S·G·A  |  G = L×C×T  (Türkiye: L=0.8, C=1.0)
+          S = 0.25·Kp+0.20·Dst+0.20·Bz↓+0.15·V+0.12·P+0.08·X
         </div>
         <div className="text-[8px] font-mono text-muted-foreground/30 leading-relaxed">
-          S = 0.18·Kp+0.22·Dst+0.30·dBdt+0.12·V+0.10·Bz↓+0.08·P
+          GPS:Kp+Bz+X · Sat:P+Kp · HF:X+Kp · Grid:sigmoid(Dst+dBdt+Kp,c=35)
         </div>
         <div className="flex items-center gap-1.5 mt-1">
           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
           <span className="text-[8px] font-mono text-muted-foreground/35 uppercase tracking-wider">
-            NOAA SWPC · Şebeke: sigmoid(R_grid-50)
+            NOAA SWPC DSCOVR/ACE · Kategori-özel fizik modeli
           </span>
         </div>
       </div>
