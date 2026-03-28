@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import { formatTime } from "@/lib/utils";
-import { Shield, RadioTower, AlertCircle, Globe, X } from "lucide-react";
+import { Shield, RadioTower, AlertCircle, Globe, X, Plane } from "lucide-react";
 import { 
   useGetCurrentSpaceWeather, 
   useGetAIPrediction, 
@@ -23,6 +24,7 @@ import { motion, AnimatePresence } from "framer-motion";
 export default function Dashboard() {
   const [time, setTime] = useState(new Date());
   const [showGlobe, setShowGlobe] = useState(false);
+  const [, navigate] = useLocation();
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -238,6 +240,22 @@ export default function Dashboard() {
             <div className="lg:col-span-3 flex flex-col gap-3">
               <AuroraCard aurora={aurora} />
               <InfrastructureCard risk={risk} />
+              {/* Aviation shortcut panel */}
+              <button
+                onClick={() => navigate("/aviation")}
+                className="w-full rounded-lg border border-blue-500/30 bg-blue-600/10 hover:bg-blue-600/20 hover:border-blue-400/50 transition-all p-3 flex items-center gap-3 group text-left"
+              >
+                <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-600/30 transition-colors">
+                  <Plane className="w-4 h-4 text-blue-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-blue-300 uppercase tracking-widest leading-tight">Havacılık Modülü</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5 truncate">HF · GPS · Radyasyon · Kutup Güzergahı</div>
+                </div>
+                <svg className="w-3.5 h-3.5 text-blue-400/60 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
             </div>
 
           </div>
