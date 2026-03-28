@@ -618,11 +618,11 @@ export function AiInsightCard({
             {/* F variants mini-table */}
             <div className="space-y-1">
               {[
-                { label: "F_final", v: phy.F_final, note: "nihai" },
-                { label: "F_new",   v: phy.F_new,   note: "temel" },
-                { label: "F_şok",   v: phy.F_shock, note: `dPd${phy.dPddt > 0 ? "+" : ""}${phy.dPddt.toFixed(1)}` },
-                { label: "F_adv",   v: phy.F_advanced, note: `d²Bz=${phy.d2Bzdt2.toFixed(1)}` },
-                { label: "F_CME",   v: phy.F_CME,   note: `Şok×${phy.shockP.toFixed(1)}` },
+                { label: "F_final", v: phy.F_final, note: "birleşik nihai" },
+                { label: "F_new",   v: phy.F_new,   note: "enerji aktarımı" },
+                { label: "F_şok",   v: phy.F_shock, note: "ani şok dahil" },
+                { label: "F_adv",   v: phy.F_advanced, note: "ivme terimi" },
+                { label: "F_CME",   v: phy.F_CME,   note: "fırtına gücü" },
               ].map(({ label, v, note }) => {
                 const fmtV = v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"k" : v.toFixed(0);
                 const logPct = Math.min(100, Math.log10(Math.max(v, 1)) / Math.log10(2e6) * 100);
@@ -721,6 +721,62 @@ export function AiInsightCard({
             ))}
           </div>
         </div>
+
+        {/* NOAA vs Model karşılaştırması */}
+        {data && pred.kpPredicted1h != null && (() => {
+          const noaaKp = data.kpIndex;
+          const modelKp = pred.kpPredicted1h!;
+          const diff = modelKp - noaaKp;
+          const absDiff = Math.abs(diff);
+          const bz = data.magneticField.bz;
+          const speed = data.solarWind.speed;
+
+          let sebep = "";
+          if (absDiff < 0.3) {
+            sebep = "Modelimiz NOAA ile uyumlu — sakin koşullar.";
+          } else if (diff > 0) {
+            if (bz < -5 && phy && phy.dBzdt < -1)
+              sebep = `Bz son ölçümlerde ${bz.toFixed(1)} nT'ye düştü, enerji kuplajı NOAA tahmininin üzerinde.`;
+            else if (bz < -3)
+              sebep = `Güney Bz (${bz.toFixed(1)} nT) manyetosfer bağlanmasını artırıyor.`;
+            else if (speed > 500)
+              sebep = `Güneş rüzgarı ${speed.toFixed(0)} km/s — dinamik basınç NOAA modelini aşıyor.`;
+            else
+              sebep = `Birleşik F_final parametreleri NOAA tahmininden ${diff.toFixed(1)} Kp fazla aktivite gösteriyor.`;
+          } else {
+            if (bz > 2)
+              sebep = `Bz kuzeye döndü (${bz.toFixed(1)} nT), manyetosferik bağlanma azalıyor.`;
+            else if (speed < 400)
+              sebep = `Güneş rüzgarı yavaşlıyor (${speed.toFixed(0)} km/s), fırtına olasılığı düşüyor.`;
+            else
+              sebep = `Anlık telemetri NOAA tahmininin ${Math.abs(diff).toFixed(1)} Kp altında seyrediyor.`;
+          }
+
+          const modelColor = modelKp >= 6 ? "text-danger" : modelKp >= 4 ? "text-warning" : "text-success";
+          const noaaColor = noaaKp >= 6 ? "text-danger" : noaaKp >= 4 ? "text-warning" : "text-success";
+          const diffLabel = diff > 0.3 ? `▲ +${diff.toFixed(1)}` : diff < -0.3 ? `▼ ${diff.toFixed(1)}` : "≈ uyumlu";
+          const diffColor = diff > 0.3 ? "text-warning" : diff < -0.3 ? "text-success" : "text-primary/60";
+
+          return (
+            <div className="bg-black/40 border border-primary/15 rounded p-3 space-y-2">
+              <div className="text-xs font-display text-primary/60 uppercase tracking-widest">Model — NOAA Karşılaştırması</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white/5 rounded p-2">
+                  <div className="text-[10px] font-display text-muted-foreground mb-0.5">NOAA Güncel</div>
+                  <div className={cn("text-lg font-mono font-bold", noaaColor)}>Kp {noaaKp.toFixed(1)}</div>
+                </div>
+                <div className="bg-white/5 rounded p-2">
+                  <div className="text-[10px] font-display text-muted-foreground mb-0.5">Bizim Model (1s)</div>
+                  <div className={cn("text-lg font-mono font-bold", modelColor)}>Kp {modelKp.toFixed(1)}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={cn("text-xs font-mono font-bold", diffColor)}>{diffLabel}</span>
+                <span className="text-[10px] font-mono text-muted-foreground leading-snug flex-1">{sebep}</span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Trend & Anomali */}
         <div className="flex items-center justify-between">
