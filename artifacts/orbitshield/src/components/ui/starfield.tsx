@@ -9,8 +9,9 @@ export function StarField() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let W = window.innerWidth;
-    let H = window.innerHeight;
+    // Use the canvas's CSS layout dimensions as a fallback to avoid 0-size
+    let W = window.innerWidth || canvas.clientWidth || document.documentElement.clientWidth || 1280;
+    let H = window.innerHeight || canvas.clientHeight || document.documentElement.clientHeight || 720;
     canvas.width = W;
     canvas.height = H;
 
@@ -189,6 +190,12 @@ export function StarField() {
     // ── MAIN DRAW LOOP ───────────────────────────────────────────────
     function draw() {
       t += 0.016;
+
+      // Guard: skip frame if canvas has no valid dimensions yet
+      if (W <= 0 || H <= 0 || deepCanvas.width <= 0 || deepCanvas.height <= 0) {
+        animId = requestAnimationFrame(draw);
+        return;
+      }
 
       ctx!.clearRect(0, 0, W, H);
       ctx!.drawImage(deepCanvas, 0, 0);
@@ -371,8 +378,11 @@ export function StarField() {
     draw();
 
     const onResize = () => {
-      W = window.innerWidth;
-      H = window.innerHeight;
+      const newW = window.innerWidth || canvas.clientWidth || document.documentElement.clientWidth || W;
+      const newH = window.innerHeight || canvas.clientHeight || document.documentElement.clientHeight || H;
+      if (newW <= 0 || newH <= 0) return;
+      W = newW;
+      H = newH;
       canvas.width = W;
       canvas.height = H;
       buildDeepSpace();

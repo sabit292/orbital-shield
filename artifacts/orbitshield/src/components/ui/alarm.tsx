@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BellRing, BellOff, Volume2, VolumeX, X, AlertTriangle, AlertOctagon, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { SpaceWeatherData, AIPrediction, SpaceWeatherAlerts, InfrastructureRisk } from "@workspace/api-client-react";
+import type { SpaceWeatherData, AIPrediction, AlertsResponse, InfrastructureRisk } from "@workspace/api-client-react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type AlarmLevel = "CRITICAL" | "HIGH" | "MODERATE";
@@ -79,7 +79,7 @@ interface CheckInput {
   current?: SpaceWeatherData;
   prediction?: AIPrediction;
   risk?: InfrastructureRisk;
-  alerts?: SpaceWeatherAlerts;
+  alerts?: AlertsResponse;
 }
 
 function checkAlarms(input: CheckInput): Omit<AlarmEvent, "id" | "timestamp" | "dismissed">[] {
@@ -87,10 +87,10 @@ function checkAlarms(input: CheckInput): Omit<AlarmEvent, "id" | "timestamp" | "
   const { current, prediction, risk } = input;
   if (!current) return events;
 
-  const kp = current.kp;
+  const kp = current.kpIndex;
   const bz = current.magneticField.bz;
   const speed = current.solarWind.speed;
-  const xClass = current.xray?.class ?? "A";
+  const xClass = current.xray?.fluxClass ?? "A";
   const overall = risk?.overallRisk ?? 0;
 
   // CRITICAL alerts
@@ -121,7 +121,7 @@ interface AlarmSystemProps {
   current?: SpaceWeatherData;
   prediction?: AIPrediction;
   risk?: InfrastructureRisk;
-  alerts?: SpaceWeatherAlerts;
+  alerts?: AlertsResponse;
 }
 
 export function AlarmSystem({ current, prediction, risk, alerts }: AlarmSystemProps) {
