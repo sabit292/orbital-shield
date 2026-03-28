@@ -323,33 +323,42 @@ type RiskValues = {
   pipelines: number; internet: number; overallRisk: number;
 };
 
-// Unified infrastructure risk formula (ChatGPT suggestion):
-// R_infra = 100 × (0.25·Kp/9 + 0.25·|Dst|/500 + 0.30·|dB/dt|/1000 + 0.10·V/1000 + 0.10·P/100) × L
+// Uzay Hava Şiddeti Skoru — S formülü (6 değişken, ağırlıklı):
+//   Normalize:
+//     Kp_n  = Kp / 9
+//     Dst_n = min(|Dst| / 500, 1)
+//     dBdt_n= min(dBdt / 1000, 1)
+//     V_n   = min(Vsw / 1000, 1)
+//     Bz_n  = min(max((-Bz) / 30, 0), 1)   ← güney Bz → enerji girişi
+//     P_n   = min(ProtonFlux / 100, 1)
+//   S = 0.18·Kp_n + 0.22·Dst_n + 0.30·dBdt_n + 0.12·V_n + 0.10·Bz_n + 0.08·P_n
+//   R_infra = 100 · S · L
 // L = bölgesel hassasiyet katsayısı (regional sensitivity factor)
-//   L=1.0 referans, Türkiye orta-düşük risk L=0.7–0.9
 function calcRiskValues(
-  kp: number, _bz: number, speed: number, _xrayFlux: number, dst: number,
+  kp: number, bz: number, speed: number, _xrayFlux: number, dst: number,
   protonFlux10: number = 0.1, dBdt: number = 0
 ): RiskValues {
   // Sanitize all inputs — NaN or ±Infinity must never reach the formula
   const safeVal = (v: number, fallback: number) => (isFinite(v) ? v : fallback);
-  kp          = safeVal(kp, 2.3);
-  speed       = safeVal(speed, 450);
-  dst         = safeVal(dst, -15);
+  kp           = safeVal(kp, 2.3);
+  bz           = safeVal(bz, -2);
+  speed        = safeVal(speed, 450);
+  dst          = safeVal(dst, -15);
   protonFlux10 = safeVal(protonFlux10, 0.1);
-  dBdt        = safeVal(dBdt, 0);
+  dBdt         = safeVal(dBdt, 0);
 
   // Normalize each term to 0–1
-  const kpTerm     = Math.min(1, Math.max(0, kp / 9));
-  const dstTerm    = Math.min(1, Math.max(0, Math.abs(dst) / 500));
-  const dBdtTerm   = Math.min(1, Math.max(0, Math.abs(dBdt) / 1000));
-  const speedTerm  = Math.min(1, Math.max(0, speed / 1000));
-  const protonTerm = Math.min(1, Math.max(0, protonFlux10 / 100));
+  const Kp_n   = Math.min(1, Math.max(0, kp / 9));
+  const Dst_n  = Math.min(1, Math.max(0, Math.abs(dst) / 500));
+  const dBdt_n = Math.min(1, Math.max(0, Math.abs(dBdt) / 1000));
+  const V_n    = Math.min(1, Math.max(0, speed / 1000));
+  const Bz_n   = Math.min(1, Math.max(0, (-bz) / 30));   // sadece güney Bz (negatif)
+  const P_n    = Math.min(1, Math.max(0, protonFlux10 / 100));
 
-  // Weighted base score (sum of weights = 1.00)
-  const base = 0.25 * kpTerm + 0.25 * dstTerm + 0.30 * dBdtTerm + 0.10 * speedTerm + 0.10 * protonTerm;
+  // Ağırlıklı uzay hava şiddeti skoru S (toplam ağırlık = 1.00)
+  const S = 0.18 * Kp_n + 0.22 * Dst_n + 0.30 * dBdt_n + 0.12 * V_n + 0.10 * Bz_n + 0.08 * P_n;
 
-  const R = (L: number) => Math.round(Math.min(100, Math.max(0, 100 * base * L)));
+  const R = (L: number) => Math.round(Math.min(100, Math.max(0, 100 * S * L)));
 
   return {
     gpsGnss:      R(1.0),   // Küresel iyonosfer — L=1.0
@@ -626,13 +635,14 @@ router.get("/infrastructure-risk", async (_req, res) => {
   })();
 
   // Guard all inputs against NaN/Infinity before passing to formula
-  const safeKp    = isFinite(kp)    && kp >= 0   ? kp    : 2.3;
-  const safeDst   = isFinite(dst)               ? dst   : -15;
-  const safeSpeed = isFinite(speed) && speed > 0 ? speed : 450;
+  const safeKp     = isFinite(kp)    && kp >= 0   ? kp    : 2.3;
+  const safeBz     = isFinite(bz)                 ? bz    : -2;
+  const safeDst    = isFinite(dst)                ? dst   : -15;
+  const safeSpeed  = isFinite(speed) && speed > 0 ? speed : 450;
   const safeProton = isFinite(protonFlux10) && protonFlux10 > 0 ? protonFlux10 : 0.1;
 
-  // Current risk using unified R_infra formula
-  const current = calcRiskValues(safeKp, bz, safeSpeed, xrayFlux, safeDst, safeProton, dBdt);
+  // Current risk using S formülü (6-değişken ağırlıklı skor)
+  const current = calcRiskValues(safeKp, safeBz, safeSpeed, xrayFlux, safeDst, safeProton, dBdt);
 
   // AI-predicted risk for 1h and 3h using predicted Kp/conditions
   const pred = aiPredict({ kp, bz, speed, density, temp, xrayFlux, bt, dst });
@@ -643,7 +653,7 @@ router.get("/infrastructure-risk", async (_req, res) => {
 
   const predicted1h = calcRiskValues(
     pred.kp1h,
-    bz * bzFactor1h,
+    safeBz * bzFactor1h,
     safeSpeed * speedFactor1h,
     xrayFlux,
     safeDst * bzFactor1h,
@@ -652,7 +662,7 @@ router.get("/infrastructure-risk", async (_req, res) => {
   );
   const predicted3h = calcRiskValues(
     pred.kp3h,
-    bz * (bzFactor1h * 0.9 + 0.1),
+    safeBz * (bzFactor1h * 0.9 + 0.1),
     safeSpeed * (speedFactor1h * 0.95 + 0.05),
     xrayFlux,
     safeDst * (bzFactor1h * 0.9 + 0.1),
