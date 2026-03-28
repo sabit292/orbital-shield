@@ -71,18 +71,21 @@ const earthFrag = /* glsl */`
     float n = fbm(uv * 6.0);
     float land = smoothstep(0.46, 0.54, n);
 
-    vec3 ocean = vec3(0.01, 0.06, 0.18);
-    vec3 shallow = vec3(0.02, 0.10, 0.25);
-    vec3 landCol = vec3(0.05, 0.14, 0.06);
-    vec3 desert  = vec3(0.18, 0.13, 0.04);
+    vec3 ocean = vec3(0.03, 0.14, 0.42);
+    vec3 shallow = vec3(0.05, 0.22, 0.55);
+    vec3 landCol = vec3(0.10, 0.32, 0.12);
+    vec3 desert  = vec3(0.45, 0.32, 0.10);
+    vec3 snow    = vec3(0.80, 0.90, 0.95);
     float detail = fbm(uv * 14.0 + 3.0);
+    float snowPole = smoothstep(0.78, 0.92, abs(uv.y - 0.5) * 2.0);
     vec3 terrainCol = mix(landCol, desert, smoothstep(0.3, 0.7, detail));
+    terrainCol = mix(terrainCol, snow, snowPole);
     vec3 base = mix(mix(ocean, shallow, smoothstep(0.3,0.46,n)), terrainCol, land);
 
     // City lights (night side) — tiny bright dots on land
     float cityNoise = fbm(uv * 40.0 + 7.0);
-    float cityMask  = land * smoothstep(0.7, 1.0, cityNoise);
-    vec3 cityGlow   = vec3(0.9, 0.85, 0.5) * cityMask * 0.6;
+    float cityMask  = land * smoothstep(0.65, 1.0, cityNoise);
+    vec3 cityGlow   = vec3(1.0, 0.92, 0.6) * cityMask * 1.2;
 
     // Polar aurora bands
     float lat = (uv.y - 0.5) * 3.14159;
@@ -97,13 +100,19 @@ const earthFrag = /* glsl */`
     vec3 auroraRed   = vec3(1.0, 0.2, 0.0);
     vec3 auroraCol   = mix(auroraGreen, auroraRed, smoothstep(5.0, 9.0, uKp));
 
-    // Diffuse lighting (fake sun from top-left)
-    vec3 lightDir = normalize(vec3(1.0, 0.5, 1.0));
-    float diff = max(0.0, dot(vNormal, lightDir));
-    float ambient = 0.10;
-    float light = ambient + diff * 0.55;
+    // Diffuse lighting — two light sources for rounder, brighter look
+    vec3 lightDir  = normalize(vec3(1.0, 0.5, 1.2));
+    vec3 lightDir2 = normalize(vec3(-0.6, 0.3, 0.8));
+    float diff  = max(0.0, dot(vNormal, lightDir));
+    float diff2 = max(0.0, dot(vNormal, lightDir2)) * 0.25;
+    float ambient = 0.28;
+    float light = ambient + diff * 0.72 + diff2;
+    // Specular shimmer on ocean
+    vec3 viewDir = normalize(vec3(0.0, 0.0, 1.0));
+    vec3 halfVec = normalize(lightDir + viewDir);
+    float spec = pow(max(0.0, dot(vNormal, halfVec)), 32.0) * (1.0 - land) * 0.35;
 
-    vec3 col = base * light + cityGlow * (1.0 - diff * 0.9) + auroraCol * aurora;
+    vec3 col = base * light + spec * vec3(0.5, 0.75, 1.0) + cityGlow * (1.0 - diff * 0.7) + auroraCol * aurora;
     // Slight cyan tint on edges (sci-fi)
     float rim = pow(1.0 - dot(vNormal, vec3(0,0,1)), 2.5) * 0.15;
     col += vec3(0.0, 0.8, 1.0) * rim;
