@@ -1162,14 +1162,17 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
       </div>
 
       {/* Formül ve kaynak notu */}
-      <div className="mt-3 border-t border-white/5 pt-2 space-y-1">
-        <div className="text-[9px] font-mono text-muted-foreground/40 leading-relaxed">
-          S = 0.18·Kp + 0.22·|Dst| + 0.30·dB/dt + 0.12·V + 0.10·Bz↓ + 0.08·P
+      <div className="mt-3 border-t border-white/5 pt-2 space-y-0.5">
+        <div className="text-[8.5px] font-mono text-muted-foreground/40 leading-relaxed">
+          S = 0.18·Kp + 0.22·|Dst| + 0.30·dBdt + 0.12·V + 0.10·Bz↓ + 0.08·P
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="text-[8.5px] font-mono text-muted-foreground/35 leading-relaxed">
+          GPS/HF: 100·(0.4Kp+0.3Bz↓+0.3P)·0.8 · Uydu: 100·(0.5S+0.5P)·0.9
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-          <span className="text-[9px] font-mono text-muted-foreground/40 uppercase tracking-wider">
-            NOAA SWPC · R = 100·S·L
+          <span className="text-[8.5px] font-mono text-muted-foreground/40 uppercase tracking-wider">
+            NOAA SWPC · R = 100·S·G·L
           </span>
         </div>
       </div>

@@ -358,18 +358,28 @@ function calcRiskValues(
   // Ağırlıklı uzay hava şiddeti skoru S (toplam ağırlık = 1.00)
   const S = 0.18 * Kp_n + 0.22 * Dst_n + 0.30 * dBdt_n + 0.12 * V_n + 0.10 * Bz_n + 0.08 * P_n;
 
+  // Genel skor (S × L) — diğer kategoriler için
   const R = (L: number) => Math.round(Math.min(100, Math.max(0, 100 * S * L)));
 
+  // Kategori-özel formüller (G = 1.0 referans değeri):
+  // R_grid  = 100 × S × G × A_grid     (elektrik şebekesi, A_grid = 0.8)
+  // R_sat   = 100 × (0.5S + 0.5P_n) × G × 0.9   (uydu: S + proton flux)
+  // R_comm  = 100 × (0.4Kp_n + 0.3Bz_n + 0.3P_n) × G × 0.8  (GPS/HF/haberleşme)
+  const G = 1.0;
+  const R_grid  = Math.round(Math.min(100, Math.max(0, 100 * S * G * 0.8)));
+  const R_sat   = Math.round(Math.min(100, Math.max(0, 100 * (0.5 * S + 0.5 * P_n) * G * 0.9)));
+  const R_comm  = Math.round(Math.min(100, Math.max(0, 100 * (0.4 * Kp_n + 0.3 * Bz_n + 0.3 * P_n) * G * 0.8)));
+
   return {
-    gpsGnss:      R(1.0),   // Küresel iyonosfer — L=1.0
-    satelliteOps: R(1.1),   // Yörünge maruziyeti — L=1.1
-    powerGrid:    R(0.8),   // Türkiye şebekesi — L=0.8
-    hfRadio:      R(1.0),   // HF standart — L=1.0
-    aviation:     R(0.9),   // THY güzergahları — L=0.9
-    humanHealth:  R(0.8),   // Yer seviyesi — L=0.8
-    pipelines:    R(0.8),   // GIC, Türkiye — L=0.8
-    internet:     R(0.9),   // Karışık — L=0.9
-    overallRisk:  R(1.0),   // Referans — L=1.0
+    gpsGnss:      R_comm,    // GPS/Haberleşme: 0.4Kp + 0.3Bz↓ + 0.3P — L=0.8
+    satelliteOps: R_sat,     // Uydu: 0.5S + 0.5P_n — L=0.9
+    powerGrid:    R_grid,    // Elektrik: S × A_grid=0.8
+    hfRadio:      R_comm,    // HF Radyo: GPS/Haberleşme formülü — L=0.8
+    aviation:     R(0.9),    // Havacılık: genel S — L=0.9
+    humanHealth:  R(0.8),    // İnsan Sağlığı: genel S — L=0.8
+    pipelines:    R(0.8),    // Boru Hatları: genel S — L=0.8
+    internet:     R(0.9),    // İnternet: genel S — L=0.9
+    overallRisk:  R(1.0),    // Genel Referans — L=1.0
   };
 }
 
