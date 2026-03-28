@@ -489,11 +489,16 @@ router.get("/current", async (req, res) => {
       }
     }
     if (xray.status === "fulfilled") {
-      const arr = xray.value as Array<{ flux?: string | number }>;
-      const last = arr[arr.length - 1];
-      xrayFlux = parseFloat(String(last?.flux ?? "1e-8")) || 1e-8;
-      xrayShort = xrayFlux * 0.4;
-      xrayLong = xrayFlux;
+      const arr = xray.value as Array<{ time_tag?: string; flux?: string | number; energy?: string }>;
+      // GOES xrays-6-hour.json interleaves two channels per minute: 0.1-0.8nm (long) and 0.05-0.4nm (short)
+      // We must explicitly filter to 0.1-0.8nm (the standard GOES long-wave X-ray used for flare classification)
+      const longWave = arr.filter(r => r.energy === "0.1-0.8nm");
+      const shortWave = arr.filter(r => r.energy === "0.05-0.4nm");
+      const lastLong  = longWave[longWave.length - 1];
+      const lastShort = shortWave[shortWave.length - 1];
+      xrayFlux  = parseFloat(String(lastLong?.flux  ?? lastShort?.flux ?? "1e-8")) || 1e-8;
+      xrayShort = parseFloat(String(lastShort?.flux ?? "5e-9")) || 5e-9;
+      xrayLong  = xrayFlux;
     }
     if (kpData.status === "fulfilled") {
       const arr = kpData.value as string[][];

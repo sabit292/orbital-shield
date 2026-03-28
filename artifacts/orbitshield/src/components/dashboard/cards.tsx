@@ -859,26 +859,41 @@ export function XRayCard({ data }: { data?: SpaceWeatherData }) {
   if (!data) return <Panel title="X-IŞINI AKIŞI" className="min-h-[200px]" />;
 
   const isHigh = ["M", "X"].includes(data.xray.fluxClass.charAt(0));
+  const updatedAt = new Date(data.timestamp).toLocaleTimeString("tr-TR", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+
+  // Format with 3 significant decimals so small minute-to-minute changes are visible
+  const fmtFlux = (v: number) => v.toExponential(3);
 
   return (
     <Panel 
-      title="X-IŞINI AKIŞI" 
+      title="X-IŞINI AKIŞI (GOES)" 
       icon={<Activity className="w-4 h-4 text-accent" />}
       glowColor={isHigh ? "red" : "cyan"}
     >
-      <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+      <div className="flex flex-col items-center justify-center h-full text-center space-y-3">
         <div className={cn(
           "font-mono text-5xl font-bold",
           isHigh ? "text-danger text-glow-red" : "text-accent text-glow-cyan"
         )} style={{ textShadow: `0 0 15px ${isHigh ? 'var(--color-danger)' : 'var(--color-accent)'}`}}>
           {data.xray.fluxClass}
         </div>
-        
-        <div className="bg-black/40 border border-white/10 px-4 py-2 rounded-md inline-block">
-          <div className="text-[10px] font-display text-muted-foreground uppercase tracking-widest mb-1">Anlık Akı</div>
-          <div className="font-mono text-sm text-foreground">
-            {data.xray.flux.toExponential(2)} W/m²
+
+        <div className="grid grid-cols-2 gap-2 w-full">
+          <div className="bg-black/40 border border-white/10 px-3 py-2 rounded-md">
+            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-widest mb-1">Uzun Dalga 0.1–0.8 nm</div>
+            <div className="font-mono text-xs text-foreground">{fmtFlux(data.xray.flux)} <span className="text-muted-foreground">W/m²</span></div>
           </div>
+          <div className="bg-black/40 border border-white/10 px-3 py-2 rounded-md">
+            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-widest mb-1">Kısa Dalga 0.05–0.4 nm</div>
+            <div className="font-mono text-xs text-foreground">{fmtFlux(data.xray.shortWave)} <span className="text-muted-foreground">W/m²</span></div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+          CANLI · Son güncelleme: {updatedAt}
         </div>
       </div>
     </Panel>
