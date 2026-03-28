@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { formatTime } from "@/lib/utils";
-import { Shield, RadioTower, AlertCircle } from "lucide-react";
+import { Shield, RadioTower, AlertCircle, Globe, X } from "lucide-react";
 import { 
   useGetCurrentSpaceWeather, 
   useGetAIPrediction, 
@@ -17,10 +17,12 @@ import {
 import { Gauge } from "@/components/ui/gauge";
 import { StarField } from "@/components/ui/starfield";
 import { AlarmSystem } from "@/components/ui/alarm";
-import { motion } from "framer-motion";
+import { Globe3D } from "@/components/ui/globe3d";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Dashboard() {
   const [time, setTime] = useState(new Date());
+  const [showGlobe, setShowGlobe] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -76,6 +78,63 @@ export default function Dashboard() {
       {/* Alarm system (floating) */}
       <AlarmSystem current={current} prediction={prediction} risk={risk} alerts={alerts} />
 
+      {/* ── 3D Globe floating window ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {showGlobe && (
+          <motion.div
+            key="globe-window"
+            initial={{ opacity: 0, scale: 0.92, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.92, y: 20 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 md:p-8"
+          >
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setShowGlobe(false)}
+            />
+
+            {/* Window */}
+            <div className="relative z-10 w-full max-w-4xl h-[70vh] flex flex-col rounded-xl overflow-hidden border border-primary/30 shadow-[0_0_60px_rgba(0,240,255,0.15)] bg-[#020b16]">
+              {/* Title bar */}
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-primary/20 bg-black/60 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  {/* traffic light style dots */}
+                  <div className="flex gap-1.5">
+                    <div className="w-3 h-3 rounded-full bg-danger/70" />
+                    <div className="w-3 h-3 rounded-full bg-warning/70" />
+                    <div className="w-3 h-3 rounded-full bg-success/70" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-primary" />
+                    <span className="font-display text-xs text-primary/90 uppercase tracking-[0.2em] font-semibold">
+                      3D DÜNYA — ETKİLENEN BÖLGELER
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-[10px] text-muted-foreground hidden sm:block">
+                    Kp {(current?.kpIndex ?? 0).toFixed(1)} · {(current?.solarWind?.speed ?? 0).toFixed(0)} km/s rüzgar
+                  </span>
+                  <button
+                    onClick={() => setShowGlobe(false)}
+                    className="w-7 h-7 rounded-md flex items-center justify-center border border-white/10 text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Globe canvas */}
+              <div className="flex-1 relative">
+                <Globe3D data={current} pred={prediction} risk={risk} />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="relative z-10">
         {/* HEADER */}
         <header className="border-b border-primary/20 bg-[#03080f]/80 backdrop-blur-xl sticky top-0 z-50">
@@ -110,6 +169,19 @@ export default function Dashboard() {
                   <span className="font-bold tracking-wider">{formatTime(time.toISOString())}</span>
                 </div>
               </div>
+
+              {/* Globe Toggle Button */}
+              <button
+                onClick={() => setShowGlobe(v => !v)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border font-display text-[10px] uppercase tracking-widest transition-all ${
+                  showGlobe
+                    ? "bg-primary/20 border-primary/60 text-primary shadow-[0_0_12px_rgba(0,240,255,0.3)]"
+                    : "bg-white/5 border-white/20 text-muted-foreground hover:border-primary/40 hover:text-primary"
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                3D DÜNYA
+              </button>
             </div>
           </div>
         </header>
