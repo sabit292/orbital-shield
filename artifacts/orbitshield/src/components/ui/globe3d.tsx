@@ -225,6 +225,56 @@ function makeMarkerTexture(hex: number): THREE.CanvasTexture {
   return t;
 }
 
+// ── Create text label sprite texture ─────────────────────────────────────────
+function makeTextSprite(label: string, hex: number): THREE.CanvasTexture {
+  const PX = 22;
+  const padding = 10;
+  const tmpC = document.createElement("canvas");
+  tmpC.width = 2; tmpC.height = 2;
+  const tmpCtx = tmpC.getContext("2d")!;
+  tmpCtx.font = `bold ${PX}px monospace`;
+  const textW = tmpCtx.measureText(label).width;
+
+  const W = Math.ceil(textW + padding * 2);
+  const H = PX + padding * 2;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const ctx = c.getContext("2d")!;
+
+  const r = (hex >> 16) & 255;
+  const g = (hex >> 8) & 255;
+  const b = hex & 255;
+  const col = `${r},${g},${b}`;
+
+  // Pill background
+  ctx.fillStyle = `rgba(0,0,0,0.72)`;
+  if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
+    ctx.beginPath();
+    (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void })
+      .roundRect(0, 0, W, H, 6);
+    ctx.fill();
+  } else {
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Border glow
+  ctx.strokeStyle = `rgba(${col},0.85)`;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(1, 1, W - 2, H - 2);
+
+  // Text
+  ctx.font = `bold ${PX}px monospace`;
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = `rgb(${col})`;
+  ctx.shadowColor = `rgb(${col})`;
+  ctx.shadowBlur = 8;
+  ctx.fillText(label, padding, H / 2);
+
+  const t = new THREE.CanvasTexture(c);
+  t.needsUpdate = true;
+  return t;
+}
+
 // ── Error boundary ────────────────────────────────────────────────────────────
 class GlobeErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -401,6 +451,7 @@ function Globe3DInner({ data, risk }: Globe3DProps) {
       markerGroup.add(new THREE.Line(rGeo, rMat));
 
       // Spike out from surface
+      const spikeLen = 0.06 + riskPct * 0.07;
       const spikeMat = new THREE.LineBasicMaterial({
         color: zone.color,
         transparent: true,
@@ -408,10 +459,29 @@ function Globe3DInner({ data, risk }: Globe3DProps) {
         blending: THREE.AdditiveBlending,
       });
       const spikeGeo = new THREE.BufferGeometry().setFromPoints([
-        pos.clone().multiplyScalar(1.0),
-        pos.clone().multiplyScalar(1.0 + 0.04 + riskPct * 0.06),
+        pos.clone(),
+        pos.clone().multiplyScalar(1.0 + spikeLen),
       ]);
       markerGroup.add(new THREE.Line(spikeGeo, spikeMat));
+
+      // Text label at spike tip
+      const labelTex = makeTextSprite(zone.label, zone.color);
+      const labelMat = new THREE.SpriteMaterial({
+        map: labelTex,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.NormalBlending,
+        opacity: 0.95,
+      });
+      const labelSprite = new THREE.Sprite(labelMat);
+      // Scale to keep text readable — aspect ratio from canvas
+      const aspect = labelTex.image.width / labelTex.image.height;
+      const labelH = 0.085;
+      labelSprite.scale.set(labelH * aspect, labelH, 1);
+      // Position at spike tip + small offset
+      const labelPos = pos.clone().multiplyScalar(1.0 + spikeLen + 0.055);
+      labelSprite.position.copy(labelPos);
+      markerGroup.add(labelSprite);
     });
 
     // Solar wind particles
