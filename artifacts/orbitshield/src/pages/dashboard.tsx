@@ -194,8 +194,8 @@ export default function Dashboard() {
           {/* TOP 3-COLUMN GRID */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-3">
 
-            {/* LEFT COLUMN */}
-            <div className="lg:col-span-3 flex flex-col gap-3">
+            {/* LEFT COLUMN — AI analiz paneli için genişletildi */}
+            <div className="lg:col-span-4 flex flex-col gap-3">
               <KpCard data={current} pred={prediction} />
               <AiInsightCard pred={prediction} data={current} history={history} />
               
@@ -228,7 +228,7 @@ export default function Dashboard() {
             </div>
 
             {/* CENTER COLUMN */}
-            <div className="lg:col-span-6 flex flex-col gap-3">
+            <div className="lg:col-span-5 flex flex-col gap-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <SolarWindCard data={current} />
                 <XRayCard data={current} />

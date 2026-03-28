@@ -459,12 +459,12 @@ function generateReasons(
 function PhysiBar({ label, pct, lvl }: { label: string; pct: number; lvl: string }) {
   const bar = lvl === "danger" ? "bg-danger" : lvl === "warning" ? "bg-warning" : "bg-success";
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[9px] font-mono text-muted-foreground w-[72px] shrink-0 truncate">{label}</span>
-      <div className="flex-1 h-1 bg-white/8 rounded-full overflow-hidden">
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-mono text-muted-foreground w-[72px] shrink-0 truncate">{label}</span>
+      <div className="flex-1 h-[5px] bg-white/8 rounded-full overflow-hidden">
         <div className={cn("h-full rounded-full", bar)} style={{ width: `${Math.min(100, pct * 100)}%` }} />
       </div>
-      <span className={cn("text-[9px] font-mono w-8 text-right shrink-0",
+      <span className={cn("text-[10px] font-mono w-8 text-right shrink-0",
         lvl === "danger" ? "text-danger" : lvl === "warning" ? "text-warning" : "text-success"
       )}>{(pct * 100).toFixed(0)}%</span>
     </div>
@@ -521,45 +521,45 @@ export function AiInsightCard({
 
         {/* ── Tahmin header ────────────────────────────────────────── */}
         <div className={cn(
-          "flex items-center justify-between rounded px-2.5 py-1.5 border text-xs font-display font-bold",
+          "flex items-center justify-between rounded px-3 py-2 border text-sm font-display font-bold",
           riskHeaderColor
         )}>
           <span>TAHMİN: {riskTr(pred.riskLevel)} RİSK</span>
-          <span className="text-[9px] font-mono opacity-80">YZ %{pred.confidence ?? 91.4} güven</span>
+          <span className="text-[11px] font-mono opacity-80">YZ %{pred.confidence ?? 91.4} güven</span>
         </div>
 
         {/* ── Fırtına türü sınıflandırması ──────────────────────────── */}
         {storm && (
-          <div className={cn("rounded border p-2.5", storm.bg)}>
+          <div className={cn("rounded border p-3", storm.bg)}>
             {/* Badge row */}
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-1.5">
-                <span className={cn("text-base leading-none", storm.color)}>{storm.icon}</span>
-                <span className={cn("text-[11px] font-display font-bold tracking-wide", storm.color)}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className={cn("text-lg leading-none", storm.color)}>{storm.icon}</span>
+                <span className={cn("text-sm font-display font-bold tracking-wide", storm.color)}>
                   {storm.label}
                 </span>
               </div>
               <div className="flex items-center gap-1">
-                <span className="text-[8px] font-mono text-muted-foreground">YZ</span>
-                <span className={cn("text-[10px] font-mono font-bold", storm.color)}>
+                <span className="text-[10px] font-mono text-muted-foreground">YZ</span>
+                <span className={cn("text-xs font-mono font-bold", storm.color)}>
                   %{storm.confidence}
                 </span>
               </div>
             </div>
             {/* Scientific name */}
-            <div className="text-[8px] font-mono text-muted-foreground/70 mb-1.5 italic">
+            <div className="text-[10px] font-mono text-muted-foreground/70 mb-1.5 italic">
               {storm.labelEn}
             </div>
             {/* Description */}
-            <p className="text-[10px] font-mono text-muted-foreground leading-snug mb-1.5">
+            <p className="text-xs font-mono text-muted-foreground leading-relaxed mb-2">
               {storm.description}
             </p>
             {/* Key signature pills */}
             {storm.signatures.length > 0 && (
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5">
                 {storm.signatures.map((sig, i) => (
                   <span key={i} className={cn(
-                    "text-[8px] font-mono px-1.5 py-0.5 rounded-sm border",
+                    "text-[10px] font-mono px-2 py-0.5 rounded border",
                     storm.color, storm.bg
                   )}>
                     {sig}
@@ -572,14 +572,14 @@ export function AiInsightCard({
 
         {/* ── Sebep listesi ─────────────────────────────────────────── */}
         {reasons.length > 0 && (
-          <div className="bg-black/40 border border-white/8 rounded p-2 space-y-1">
-            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-widest mb-1.5">
+          <div className="bg-black/40 border border-white/8 rounded p-2.5 space-y-1.5">
+            <div className="text-[10px] font-display text-muted-foreground uppercase tracking-widest mb-2">
               Sebep
             </div>
             {reasons.map((r, i) => (
-              <div key={i} className="flex items-start gap-1.5">
-                <span className={cn("mt-[3px] shrink-0 text-[8px]", dotColor(r.level))}>▶</span>
-                <span className={cn("text-[10px] font-mono leading-snug", textColor(r.level))}>
+              <div key={i} className="flex items-start gap-2">
+                <span className={cn("mt-[3px] shrink-0 text-[10px]", dotColor(r.level))}>▶</span>
+                <span className={cn("text-xs font-mono leading-relaxed", textColor(r.level))}>
                   {r.text}
                 </span>
               </div>
@@ -589,67 +589,69 @@ export function AiInsightCard({
 
         {/* Metrics grid — fırtına olasılıkları */}
         <div className="grid grid-cols-2 gap-2">
-          <div className="bg-white/5 border border-white/10 rounded p-2">
-            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">Fırtına Olas. 1S</div>
-            <div className="text-xs font-bold font-mono text-warning">{pred.stormProbability1h ?? 0}%</div>
+          <div className="bg-white/5 border border-white/10 rounded p-2.5">
+            <div className="text-[10px] font-display text-muted-foreground uppercase tracking-wider mb-1">Fırtına Olas. 1S</div>
+            <div className="text-sm font-bold font-mono text-warning">{pred.stormProbability1h ?? 0}%</div>
           </div>
-          <div className="bg-white/5 border border-white/10 rounded p-2">
-            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">Fırtına Olas. 24S</div>
-            <div className="text-xs font-bold font-mono text-warning">{pred.stormProbability24h ?? 0}%</div>
+          <div className="bg-white/5 border border-white/10 rounded p-2.5">
+            <div className="text-[10px] font-display text-muted-foreground uppercase tracking-wider mb-1">Fırtına Olas. 24S</div>
+            <div className="text-sm font-bold font-mono text-warning">{pred.stormProbability24h ?? 0}%</div>
           </div>
         </div>
 
-        {/* Physics Engine block — 4 F variants */}
+        {/* Physics Engine block */}
         {phy && (
-          <div className="bg-black/40 border border-accent/20 rounded p-2 space-y-1.5">
+          <div className="bg-black/40 border border-accent/20 rounded p-3 space-y-2">
             {/* Header row */}
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[9px] font-display text-accent/80 uppercase tracking-widest">Fizik Motoru</span>
-              <div className="flex items-center gap-1">
-                <span className="text-[8px] font-mono text-accent/60 border border-accent/30 rounded px-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-display text-accent/80 uppercase tracking-widest">Fizik Motoru</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-mono text-accent/60 border border-accent/30 rounded px-1.5 py-0.5">
                   {phy.fLabel}
                 </span>
-                <span className={cn("text-[9px] font-mono font-bold",
+                <span className={cn("text-xs font-mono font-bold",
                   phy.fLvl === "danger" ? "text-danger" : phy.fLvl === "warning" ? "text-warning" : "text-success"
                 )}>{phy.fmtF}</span>
               </div>
             </div>
 
-            {/* F variants mini-table — F_final aktif (birleşik nihai formül) */}
-            {[
-              { label: "F_final", v: phy.F_final, note: "nihai" },
-              { label: "F_new",   v: phy.F_new,   note: "temel" },
-              { label: "F_şok",   v: phy.F_shock, note: `dPd=${phy.dPddt > 0 ? "+" : ""}${phy.dPddt.toFixed(1)}` },
-              { label: "F_adv",   v: phy.F_advanced, note: `d²Bz=${phy.d2Bzdt2.toFixed(1)}` },
-              { label: "F_CME",   v: phy.F_CME,   note: `Şok×${phy.shockP.toFixed(1)}` },
-            ].map(({ label, v, note }) => {
-              const fmtV = v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"k" : v.toFixed(0);
-              const logPct = Math.min(100, Math.log10(Math.max(v, 1)) / Math.log10(2e6) * 100);
-              const active = label === "F_final";
-              const lvlColor = v < 80_000 ? "bg-success" : v < 400_000 ? "bg-warning" : "bg-danger";
-              const txtColor = v < 80_000 ? "text-success" : v < 400_000 ? "text-warning" : "text-danger";
-              return (
-                <div key={label} className={cn(
-                  "flex items-center gap-1.5 rounded px-1",
-                  active ? "bg-accent/10 outline outline-[0.5px] outline-accent/40" : ""
-                )}>
-                  <span className={cn("text-[8px] font-mono w-[42px] shrink-0", active ? "text-accent font-bold" : "text-muted-foreground/55")}>
-                    {label}
-                  </span>
-                  <div className="flex-1 h-[3px] bg-white/8 rounded-full overflow-hidden">
-                    <div className={cn("h-full rounded-full", active ? lvlColor : "bg-white/20")} style={{ width: `${logPct}%` }} />
+            {/* F variants mini-table */}
+            <div className="space-y-1">
+              {[
+                { label: "F_final", v: phy.F_final, note: "nihai" },
+                { label: "F_new",   v: phy.F_new,   note: "temel" },
+                { label: "F_şok",   v: phy.F_shock, note: `dPd${phy.dPddt > 0 ? "+" : ""}${phy.dPddt.toFixed(1)}` },
+                { label: "F_adv",   v: phy.F_advanced, note: `d²Bz=${phy.d2Bzdt2.toFixed(1)}` },
+                { label: "F_CME",   v: phy.F_CME,   note: `Şok×${phy.shockP.toFixed(1)}` },
+              ].map(({ label, v, note }) => {
+                const fmtV = v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"k" : v.toFixed(0);
+                const logPct = Math.min(100, Math.log10(Math.max(v, 1)) / Math.log10(2e6) * 100);
+                const active = label === "F_final";
+                const lvlColor = v < 80_000 ? "bg-success" : v < 400_000 ? "bg-warning" : "bg-danger";
+                const txtColor = v < 80_000 ? "text-success" : v < 400_000 ? "text-warning" : "text-danger";
+                return (
+                  <div key={label} className={cn(
+                    "flex items-center gap-2 rounded px-1.5 py-0.5",
+                    active ? "bg-accent/10 outline outline-[0.5px] outline-accent/40" : ""
+                  )}>
+                    <span className={cn("text-[10px] font-mono w-[46px] shrink-0", active ? "text-accent font-bold" : "text-muted-foreground/55")}>
+                      {label}
+                    </span>
+                    <div className="flex-1 h-1 bg-white/8 rounded-full overflow-hidden">
+                      <div className={cn("h-full rounded-full", active ? lvlColor : "bg-white/20")} style={{ width: `${logPct}%` }} />
+                    </div>
+                    <span className={cn("text-[10px] font-mono w-9 text-right shrink-0", active ? txtColor : "text-muted-foreground/45")}>
+                      {fmtV}
+                    </span>
+                    <span className="text-[8px] font-mono text-muted-foreground/35 w-[54px] text-right shrink-0 truncate">{note}</span>
                   </div>
-                  <span className={cn("text-[8px] font-mono w-8 text-right shrink-0", active ? txtColor : "text-muted-foreground/45")}>
-                    {fmtV}
-                  </span>
-                  <span className="text-[7px] font-mono text-muted-foreground/35 w-[52px] text-right shrink-0 truncate">{note}</span>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
 
-            {/* En Etkili Faktörler — katkı barları */}
-            <div className="border-t border-accent/15 pt-1.5 mt-0.5">
-              <div className="text-[8px] font-display text-accent/60 uppercase tracking-widest mb-1">En Etkili Faktörler</div>
+            {/* En Etkili Faktörler */}
+            <div className="border-t border-accent/15 pt-2">
+              <div className="text-[10px] font-display text-accent/60 uppercase tracking-widest mb-1.5">En Etkili Faktörler</div>
               {(() => {
                 const factors = [
                   {
@@ -672,37 +674,30 @@ export function AiInsightCard({
                   },
                   {
                     label: `t_Bz<0 = ${phy.tBzNeg < 1 ? `${(phy.tBzNeg*60).toFixed(0)}dk` : `${phy.tBzNeg.toFixed(1)}s`}`,
-                    note: "negatif Bz süresi",
+                    note: "neg. Bz süresi",
                     pct: Math.min(1, phy.tBzNeg / 6),
                     color: phy.tBzNeg > 3 ? "bg-danger" : phy.tBzNeg > 1 ? "bg-warning" : "bg-success",
                   },
                 ].sort((a, b) => b.pct - a.pct);
                 return factors.map((f, i) => (
-                  <div key={i} className="flex items-center gap-1.5 mb-[3px]">
-                    <span className="text-[7px] font-mono text-muted-foreground/60 w-[90px] shrink-0 truncate">{f.label}</span>
+                  <div key={i} className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-mono text-muted-foreground/70 w-[100px] shrink-0 truncate">{f.label}</span>
                     <div className="flex-1 h-[5px] bg-white/8 rounded-full overflow-hidden">
                       <div className={cn("h-full rounded-full transition-all", f.color)} style={{ width: `${f.pct * 100}%` }} />
                     </div>
-                    <span className="text-[7px] font-mono text-muted-foreground/45 w-[26px] text-right shrink-0">{(f.pct*100).toFixed(0)}%</span>
-                    <span className="text-[6px] font-mono text-muted-foreground/30 w-[50px] text-right shrink-0 truncate">{f.note}</span>
+                    <span className="text-[10px] font-mono text-muted-foreground/60 w-7 text-right shrink-0">{(f.pct*100).toFixed(0)}%</span>
+                    <span className="text-[9px] font-mono text-muted-foreground/35 w-[56px] text-right shrink-0 truncate">{f.note}</span>
                   </div>
                 ));
               })()}
             </div>
 
-            {/* t_{Bz<0} info line */}
-            <div className="text-[7px] font-mono text-muted-foreground/50 pt-0.5">
-              t_Bz&lt;0={phy.tBzNeg < 1 ? `${(phy.tBzNeg*60).toFixed(0)}dk` : `${phy.tBzNeg.toFixed(1)}s`}
-              {" · "}dBz={phy.dBzdt.toFixed(1)} nT/5dk
-              {" · "}ln(t)={Math.log(1+Math.max(phy.tBzNeg,0.05)).toFixed(2)}
-            </div>
-
             {/* GPS / SAT risk */}
-            <div className="border-t border-white/5 pt-1 space-y-1">
+            <div className="border-t border-white/5 pt-2 space-y-1.5">
               <PhysiBar label="GPSrisk" pct={phy.gpsR} lvl={phy.gLvl} />
               <PhysiBar label="SATrisk" pct={phy.satR} lvl={phy.sLvl} />
             </div>
-            <div className="text-[7px] font-mono text-muted-foreground/40 leading-relaxed">
+            <div className="text-[8px] font-mono text-muted-foreground/40 leading-relaxed">
               GPS=0.5·|Bz|/20+0.3·V/1k+0.2·Kp/9 · SAT=0.4·Pd/50+0.4·Fp/1k+0.2·|Dst|/200
             </div>
           </div>
@@ -710,7 +705,7 @@ export function AiInsightCard({
 
         {/* Kp Tahmin sırası */}
         <div className="bg-black/30 border border-white/5 rounded p-2">
-          <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-1.5">Kp Tahmini</div>
+          <div className="text-[10px] font-display text-muted-foreground uppercase tracking-wider mb-1.5">Kp Tahmini</div>
           <div className="flex gap-3">
             {[
               { label: "1 Saat", val: pred.kpPredicted1h },
@@ -718,8 +713,8 @@ export function AiInsightCard({
               { label: "6 Saat", val: (pred as any).kpPredicted6h },
             ].map((p, i) => p.val != null && (
               <div key={i} className="flex-1 text-center">
-                <div className="text-[9px] font-display text-muted-foreground">{p.label}</div>
-                <div className={cn("text-sm font-mono font-bold",
+                <div className="text-[10px] font-display text-muted-foreground">{p.label}</div>
+                <div className={cn("text-base font-mono font-bold",
                   p.val >= 6 ? "text-danger" : p.val >= 4 ? "text-warning" : "text-success"
                 )}>{p.val.toFixed(1)}</div>
               </div>
@@ -729,10 +724,10 @@ export function AiInsightCard({
 
         {/* Trend & Anomali */}
         <div className="flex items-center justify-between">
-          <span className={cn("text-[10px] font-display font-bold", trendClr(pred.trend))}>
+          <span className={cn("text-xs font-display font-bold", trendClr(pred.trend))}>
             {trendTr(pred.trend)}
           </span>
-          <span className="text-[9px] font-display text-muted-foreground">YZ %91.4 Doğruluk</span>
+          <span className="text-[10px] font-display text-muted-foreground">YZ %91.4 Doğruluk</span>
         </div>
 
         {pred.anomalyDetected && (
