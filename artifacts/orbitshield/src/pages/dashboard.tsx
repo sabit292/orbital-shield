@@ -115,17 +115,17 @@ export default function Dashboard() {
         </header>
 
         {/* MAIN DASHBOARD */}
-        <main className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto space-y-6">
+        <main className="p-3 md:p-4 lg:p-5 max-w-[1600px] mx-auto space-y-3">
 
           {/* TOP 3-COLUMN GRID */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-3">
 
             {/* LEFT COLUMN */}
-            <div className="lg:col-span-3 flex flex-col gap-6">
+            <div className="lg:col-span-3 flex flex-col gap-3">
               <KpCard data={current} pred={prediction} />
               <AiInsightCard pred={prediction} />
               
-              <div className="grid grid-cols-2 gap-4 min-h-[200px]">
+              <div className="grid grid-cols-2 gap-3 min-h-[200px]">
                 <div className="bg-card/60 border border-white/10 rounded-xl flex flex-col items-center justify-center backdrop-blur-md relative overflow-hidden group py-3">
                   <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
                   <Gauge 
@@ -154,8 +154,8 @@ export default function Dashboard() {
             </div>
 
             {/* CENTER COLUMN */}
-            <div className="lg:col-span-6 flex flex-col gap-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="lg:col-span-6 flex flex-col gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <SolarWindCard data={current} />
                 <XRayCard data={current} />
               </div>
@@ -163,7 +163,7 @@ export default function Dashboard() {
             </div>
 
             {/* RIGHT COLUMN */}
-            <div className="lg:col-span-3 flex flex-col gap-6">
+            <div className="lg:col-span-3 flex flex-col gap-3">
               <AuroraCard aurora={aurora} />
               <InfrastructureCard risk={risk} />
               <ExtraDataCard data={current} />
