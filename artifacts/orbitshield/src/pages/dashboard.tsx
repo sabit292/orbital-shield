@@ -12,7 +12,7 @@ import {
 import {
   KpCard, AiInsightCard, SolarWindCard, XRayCard, 
   ChartsCard, AuroraCard, InfrastructureCard,
-  InfrastructurePredictionCard, ExtraDataCard 
+  InfrastructurePredictionCard 
 } from "@/components/dashboard/cards";
 import { Gauge } from "@/components/ui/gauge";
 import { StarField } from "@/components/ui/starfield";
@@ -238,7 +238,6 @@ export default function Dashboard() {
             <div className="lg:col-span-3 flex flex-col gap-3">
               <AuroraCard aurora={aurora} />
               <InfrastructureCard risk={risk} />
-              <ExtraDataCard data={current} />
             </div>
 
           </div>
