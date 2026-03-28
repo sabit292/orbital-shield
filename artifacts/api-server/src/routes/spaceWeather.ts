@@ -280,15 +280,40 @@ function aiPredict(features: {
 function generateAiInsight(kp: number, bz: number, speed: number, xrayFlux: number, prediction: ReturnType<typeof aiPredict>): string {
   const parts: string[] = [];
   const xClass = classifyXRay(xrayFlux);
-  parts.push(`KP ${kp.toFixed(1)}'de koşullar ${kp < 3 ? "nispeten istikrarlı" : kp < 5 ? "hafif aktif" : kp < 7 ? "fırtınalı" : "aşırı fırtınalı"}.`);
-  parts.push(`Güneş rüzgarı hızı ${speed.toFixed(0)} km/s, Bz ${bz.toFixed(1)} nT.`);
-  if (bz < -10) parts.push("Güçlü güneye yönelik manyetik alan tespit edildi — jeomanyetik fırtına riski yüksek.");
-  else if (bz < -5) parts.push("Orta düzey güneye yönelik Bz — dikkatli izleme önerilir.");
-  else if (bz > 5) parts.push("Kuzeye yönelik Bz — jeomanyetik etki azaltılıyor.");
-  if (xClass === "X") parts.push("⚠️ X-sınıfı güneş patlaması aktif — tüm sistemlerde acil protokol başlatılıyor.");
-  else if (xClass === "M") parts.push("M-sınıfı güneş patlaması tespit edildi — yüksek frekans iletişimi etkilenebilir.");
-  if (prediction.trend === "RISING") parts.push("Yapay zeka modeli aktivite artışı öngörüyor.");
-  else if (prediction.trend === "FALLING") parts.push("Şartlar iyileşiyor, %91 güven aralığında düşüş bekleniyor.");
+
+  // 1. Genel durum
+  const stormState = kp >= 8 ? "aşırı fırtınalı (G4-G5)" : kp >= 6 ? "şiddetli fırtınalı (G2-G3)"
+    : kp >= 5 ? "hafif fırtınalı (G1)" : kp >= 4 ? "yüksek aktif" : kp >= 3 ? "orta aktif" : "sakin";
+  parts.push(`Kp ${kp.toFixed(1)} — uzay hava koşulları ${stormState}.`);
+
+  // 2. Bz etkisi
+  const bzDesc = bz < -15 ? "kritik güney yönlü (manyetopoz açık)" : bz < -8 ? "güçlü güney yönlü (fırtına başlangıcı)"
+    : bz < -3 ? "orta güney yönlü" : bz > 5 ? "kuzey yönlü (koruyucu)" : "nötr";
+  parts.push(`Güneş rüzgarı ${speed.toFixed(0)} km/s, Bz ${bz.toFixed(1)} nT (${bzDesc}).`);
+
+  // 3. Spesifik uyarılar
+  if (bz < -15) parts.push("Manyetopoz tamamen açılmış; şebeke ve GPS sistemlerinde ciddi bozulma bekleniyor.");
+  else if (bz < -8) parts.push("Güney Bz manyetosfer içine enerji pompalıyor; 1-3 saat içinde jeomanyetik aktivite artışı olası.");
+  else if (bz < -3) parts.push("Zayıf güney bileşeni var; koşullar hızla değişebilir.");
+  else if (bz > 5) parts.push("Kuzey Bz manyetik bağlantıyı sınırlandırıyor; jeomanyetik etki düşük.");
+
+  // 4. X-ışını
+  if (xClass === "X") parts.push("X sınıfı patlama aktif — HF radyo karartması ve GPS sapması bekleniyor.");
+  else if (xClass === "M") parts.push("M sınıfı patlama — polar HF iletişimi ve GPS hassasiyeti etkilenebilir.");
+  else if (xClass === "C") parts.push("C sınıfı patlama — küçük ölçekli iyonosfer bozulması olası.");
+
+  // 5. Hız uyarısı
+  if (speed > 700) parts.push(`Rüzgar hızı ${speed.toFixed(0)} km/s ile kritik eşikte — CME şoku aktif olabilir.`);
+  else if (speed > 550) parts.push(`Yüksek güneş rüzgarı (${speed.toFixed(0)} km/s) jeomanyetik koşulları kötüleştirebilir.`);
+
+  // 6. YZ tahmini
+  if (prediction.trend === "RISING")
+    parts.push(`YZ modeli 1 saatte Kp ${prediction.kp1h.toFixed(1)}, 3 saatte ${prediction.kp3h.toFixed(1)} öngörüyor — aktivite artıyor.`);
+  else if (prediction.trend === "FALLING")
+    parts.push(`Koşullar iyileşiyor; YZ modeli 1 saatte Kp ${prediction.kp1h.toFixed(1)}, 3 saatte ${prediction.kp3h.toFixed(1)} öngörüyor.`);
+  else
+    parts.push(`Koşullar istikrarlı; YZ modeli 1 saatte Kp ${prediction.kp1h.toFixed(1)}, 3 saatte ${prediction.kp3h.toFixed(1)} öngörüyor.`);
+
   return parts.join(" ");
 }
 

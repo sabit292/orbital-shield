@@ -48,7 +48,7 @@ export function Panel({
         <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
           <div className="flex items-center gap-2">
             {icon && <span className="text-primary/80">{icon}</span>}
-            <h3 className="font-display text-sm tracking-widest text-primary/90 font-semibold uppercase">
+            <h3 className="font-display text-[11px] tracking-widest text-primary/90 font-semibold uppercase leading-tight">
               {title}
             </h3>
           </div>

@@ -125,27 +125,29 @@ export default function Dashboard() {
               <KpCard data={current} pred={prediction} />
               <AiInsightCard pred={prediction} />
               
-              <div className="grid grid-cols-2 gap-4 flex-1">
-                <div className="bg-card/60 border border-white/10 rounded-xl flex items-center justify-center backdrop-blur-md relative overflow-hidden group">
+              <div className="grid grid-cols-2 gap-4 min-h-[200px]">
+                <div className="bg-card/60 border border-white/10 rounded-xl flex flex-col items-center justify-center backdrop-blur-md relative overflow-hidden group py-3">
                   <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
                   <Gauge 
-                    title="FIRTINA OLASILIĞI" 
+                    title="FIRTINA" 
                     value={prediction?.stormProbability24h ?? 0} 
                     color="hsl(var(--primary))"
-                    subtitle="24 SAAT"
+                    subtitle="OLASILIK %"
+                    size={120}
                   />
                 </div>
-                <div className="bg-card/60 border border-white/10 rounded-xl flex items-center justify-center backdrop-blur-md relative overflow-hidden group">
+                <div className="bg-card/60 border border-white/10 rounded-xl flex flex-col items-center justify-center backdrop-blur-md relative overflow-hidden group py-3">
                   <div className="absolute inset-0 bg-danger/5 opacity-0 group-hover:opacity-100 transition-opacity" />
                   <Gauge 
-                    title="RİSK PUANI" 
+                    title="YZ RİSK" 
                     value={prediction?.riskScore ?? 0} 
                     color={
                       (prediction?.riskScore ?? 0) > 70 ? "hsl(var(--danger))" : 
                       (prediction?.riskScore ?? 0) > 40 ? "hsl(var(--warning))" : 
                       "hsl(var(--success))"
                     }
-                    subtitle="AI SKORU"
+                    subtitle="PUAN"
+                    size={120}
                   />
                 </div>
               </div>

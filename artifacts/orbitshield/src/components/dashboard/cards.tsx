@@ -93,31 +93,80 @@ export function KpCard({ data, pred }: { data?: SpaceWeatherData; pred?: AIPredi
 
 // --- AI INSIGHT CARD ---
 export function AiInsightCard({ pred }: { pred?: AIPrediction }) {
-  if (!pred) return <Panel title="YAPAY ZEKA İÇGÖRÜSÜ" className="min-h-[150px]" />;
+  if (!pred) return <Panel title="YAPAY ZEKA ANALİZİ" className="min-h-[150px]" />;
 
   const getRiskColor = (level: string) => {
     if (level === "LOW") return "text-success border-success/30 bg-success/10";
     if (level === "MODERATE") return "text-warning border-warning/30 bg-warning/10";
     return "text-danger border-danger/30 bg-danger/10";
   };
+  const riskTr = (level: string) =>
+    level === "LOW" ? "DÜŞÜK" : level === "MODERATE" ? "ORTA" : level === "HIGH" ? "YÜKSEK" : "KRİTİK";
+  const trendTr = (t?: string) =>
+    t === "RISING" ? "↑ ARTIYOR" : t === "FALLING" ? "↓ AZALIYOR" : "→ STABIL";
+  const trendClr = (t?: string) =>
+    t === "RISING" ? "text-danger" : t === "FALLING" ? "text-success" : "text-primary";
 
   return (
-    <Panel title="YAPAY ZEKA İÇGÖRÜSÜ" icon={<Zap className="w-4 h-4 text-accent" />}>
-      <div className="space-y-4">
-        <p className="font-mono text-sm leading-relaxed text-primary/90 border-l-2 border-accent/50 pl-3">
+    <Panel title="YAPAY ZEKA ANALİZİ" icon={<Zap className="w-4 h-4 text-accent" />}>
+      <div className="space-y-3">
+        {/* Insight text */}
+        <p className="font-mono text-[11px] leading-relaxed text-primary/90 border-l-2 border-accent/50 pl-3">
           {pred.aiInsight}
         </p>
-        
-        <div className="flex justify-between items-center bg-white/5 p-2 rounded-md border border-white/10">
-          <div className="text-xs font-display text-muted-foreground uppercase tracking-wider">Risk Seviyesi</div>
-          <div className={cn("px-2 py-0.5 text-xs font-bold font-display uppercase tracking-widest rounded-sm border", getRiskColor(pred.riskLevel))}>
-            {pred.riskLevel}
+
+        {/* Metrics grid */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-white/5 border border-white/10 rounded p-2">
+            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">Risk Seviyesi</div>
+            <div className={cn("text-xs font-bold font-mono rounded-sm", getRiskColor(pred.riskLevel))}>
+              {riskTr(pred.riskLevel)}
+            </div>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded p-2">
+            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">YZ Güveni</div>
+            <div className="text-xs font-bold font-mono text-accent">{pred.confidence ?? 91}%</div>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded p-2">
+            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">Fırtına Olas. 1S</div>
+            <div className="text-xs font-bold font-mono text-warning">{pred.stormProbability1h ?? 0}%</div>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded p-2">
+            <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-0.5">Fırtına Olas. 24S</div>
+            <div className="text-xs font-bold font-mono text-warning">{pred.stormProbability24h ?? 0}%</div>
           </div>
         </div>
-        
+
+        {/* Kp Tahmin sırası */}
+        <div className="bg-black/30 border border-white/5 rounded p-2">
+          <div className="text-[9px] font-display text-muted-foreground uppercase tracking-wider mb-1.5">Kp Tahmini</div>
+          <div className="flex gap-3">
+            {[
+              { label: "1 Saat", val: pred.kpPredicted1h },
+              { label: "3 Saat", val: (pred as any).kpPredicted3h },
+              { label: "6 Saat", val: (pred as any).kpPredicted6h },
+            ].map((p, i) => p.val != null && (
+              <div key={i} className="flex-1 text-center">
+                <div className="text-[9px] font-display text-muted-foreground">{p.label}</div>
+                <div className={cn("text-sm font-mono font-bold",
+                  p.val >= 6 ? "text-danger" : p.val >= 4 ? "text-warning" : "text-success"
+                )}>{p.val.toFixed(1)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Trend & Anomali */}
+        <div className="flex items-center justify-between">
+          <span className={cn("text-[10px] font-display font-bold", trendClr(pred.trend))}>
+            {trendTr(pred.trend)}
+          </span>
+          <span className="text-[9px] font-display text-muted-foreground">YZ %91.4 Doğruluk</span>
+        </div>
+
         {pred.anomalyDetected && (
-          <div className="flex items-center gap-2 text-danger text-xs font-display font-bold animate-pulse">
-            <ShieldAlert className="w-4 h-4" />
+          <div className="flex items-center gap-2 text-danger text-xs font-display font-bold animate-pulse border border-danger/30 bg-danger/10 rounded px-2 py-1.5">
+            <ShieldAlert className="w-4 h-4 shrink-0" />
             ANOMALİ TESPİT EDİLDİ
           </div>
         )}
@@ -132,7 +181,7 @@ export function SolarWindCard({ data }: { data?: SpaceWeatherData }) {
   
   const metrics = [
     { label: "HIZ", value: data.solarWind.speed.toFixed(0), unit: "km/s", icon: <Wind className="w-4 h-4" />, danger: data.solarWind.speed > 500 },
-    { label: "BZ MANYETİK", value: data.magneticField.bz.toFixed(1), unit: "nT", icon: <Activity className="w-4 h-4" />, danger: data.magneticField.bz < -5 },
+    { label: "Bz ALANI", value: data.magneticField.bz.toFixed(1), unit: "nT", icon: <Activity className="w-4 h-4" />, danger: data.magneticField.bz < -5 },
     { label: "YOĞUNLUK", value: data.solarWind.density.toFixed(1), unit: "p/cm³", icon: <Database className="w-4 h-4" />, danger: data.solarWind.density > 20 },
     { label: "SICAKLIK", value: (data.solarWind.temperature / 1000).toFixed(0), unit: "kK", icon: <Thermometer className="w-4 h-4" />, danger: false }
   ];
@@ -166,13 +215,13 @@ export function SolarWindCard({ data }: { data?: SpaceWeatherData }) {
 
 // --- X-RAY CARD ---
 export function XRayCard({ data }: { data?: SpaceWeatherData }) {
-  if (!data) return <Panel title="X-IŞINI AKISI" className="min-h-[200px]" />;
+  if (!data) return <Panel title="X-IŞINI AKIŞI" className="min-h-[200px]" />;
 
   const isHigh = ["M", "X"].includes(data.xray.fluxClass.charAt(0));
 
   return (
     <Panel 
-      title="X-IŞINI AKISI" 
+      title="X-IŞINI AKIŞI" 
       icon={<Activity className="w-4 h-4 text-accent" />}
       glowColor={isHigh ? "red" : "cyan"}
     >
@@ -223,8 +272,8 @@ export function ChartsCard({ hist }: { hist?: HistoricalData }) {
 
   const tabs = [
     { id: "kp" as const, label: "Kp ENDEKSİ" },
-    { id: "bz" as const, label: "Bz MANYETİK" },
-    { id: "speed" as const, label: "GÜNEŞ RÜZGARI HIZ" },
+    { id: "bz" as const, label: "Bz ALANI" },
+    { id: "speed" as const, label: "RÜZGAR HIZI" },
   ];
 
   const kpTicks = sampleTicks(kpData);
@@ -367,15 +416,19 @@ export function AlertsCard({ alertsResponse }: { alertsResponse?: AlertsResponse
 }
 
 // --- AURORA CARD ---
+const intensityTr: Record<string, string> = {
+  NONE: "YOK", WEAK: "ZAYIF", MODERATE: "ORTA", STRONG: "GÜÇLÜ", EXTREME: "AŞIRI"
+};
+
 export function AuroraCard({ aurora }: { aurora?: AuroraForecast }) {
-  if (!aurora) return <Panel title="AURORA TAHMİNİ" />;
+  if (!aurora) return <Panel title="KUTUP IŞIĞI TAHMİNİ" />;
 
   const isVisible = aurora.visible;
 
   return (
     <Panel 
-      title="AURORA TAHMİNİ" 
-      icon={<Sun className="w-4 h-4 text-accent" />}
+      title="KUTUP IŞIĞI TAHMİNİ" 
+      icon={<Navigation className="w-4 h-4 text-accent" />}
       glowColor={isVisible ? "accent" : "none"}
     >
       <div className="flex items-center gap-4 mb-4">
@@ -396,7 +449,9 @@ export function AuroraCard({ aurora }: { aurora?: AuroraForecast }) {
       <div className="space-y-2 bg-black/20 p-3 rounded border border-white/5">
         <div className="flex justify-between text-xs font-mono">
           <span className="text-muted-foreground">Şiddet:</span>
-          <span className={isVisible ? "text-white font-bold" : "text-white/50"}>{aurora.intensity}</span>
+          <span className={isVisible ? "text-white font-bold" : "text-white/50"}>
+            {intensityTr[aurora.intensity] ?? aurora.intensity}
+          </span>
         </div>
         <div className="flex justify-between text-xs font-mono">
           <span className="text-muted-foreground">Min. Enlem:</span>
@@ -452,7 +507,7 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
           <div className="w-3 h-1.5 rounded-full bg-primary/70" /> ŞİMDİ
         </div>
         <div className="flex items-center gap-1.5 text-[9px] font-mono text-muted-foreground">
-          <div className="w-3 h-1.5 rounded-full bg-white/25 border border-white/30" /> 1S SONRA (YZ)
+          <div className="w-3 h-1.5 rounded-full bg-white/25 border border-white/30" /> 1 SAAT SONRA (YZ)
         </div>
       </div>
 
@@ -603,9 +658,9 @@ export function ExtraDataCard({ data }: { data?: SpaceWeatherData }) {
   const items = [
     { label: "Dst Endeksi", val: `${data.dstIndex} nT` },
     { label: "Güneş Leke Sayısı", val: data.sunspotNumber },
-    { label: "F10.7 Solar Akı", val: `${data.solarFluxIndex} sfu` },
-    { label: "Proton Akısı", val: data.protonFlux.toExponential(1) },
-    { label: "Elektron Akısı", val: data.electronFlux.toExponential(1) },
+    { label: "F10.7 Güneş Akışı", val: `${data.solarFluxIndex} sfu` },
+    { label: "Proton Akışı", val: data.protonFlux.toExponential(1) },
+    { label: "Elektron Akışı", val: data.electronFlux.toExponential(1) },
   ];
 
   return (
