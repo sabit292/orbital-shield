@@ -11,7 +11,7 @@ import {
 } from "@workspace/api-client-react";
 import {
   KpCard, AiInsightCard, SolarWindCard, XRayCard, 
-  ChartsCard, AlertsCard, AuroraCard, InfrastructureCard,
+  ChartsCard, AuroraCard, InfrastructureCard,
   InfrastructurePredictionCard, ExtraDataCard 
 } from "@/components/dashboard/cards";
 import { Gauge } from "@/components/ui/gauge";
@@ -160,7 +160,6 @@ export default function Dashboard() {
                 <XRayCard data={current} />
               </div>
               <ChartsCard hist={history} />
-              <AlertsCard alertsResponse={alerts} />
             </div>
 
             {/* RIGHT COLUMN */}
