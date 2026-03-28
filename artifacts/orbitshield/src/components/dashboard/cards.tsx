@@ -148,11 +148,16 @@ function physicsCalc(
   const F_CME = Math.pow(V, 1.5) * Math.pow(absBz, 1.4) * Math.pow(safeN, 0.5)
               * Math.pow(Math.max(shockP, 0.01), 0.8) * logTBz;
 
-  // ── Active F selection based on conditions ─────────────────────────────────
-  const isCMELike   = shockP > 2.0 && Fluxp > 5;
-  const isShockLike = dPddt  > 2.0;   // Pd rising >2 nPa/hour
-  const F       = isCMELike ? F_CME : isShockLike ? F_shock : F_new;
-  const fLabel  = isCMELike ? "F_CME" : isShockLike ? "F_şok" : "F_new";
+  // F_final = V^1.5 · |Bz|^1.6 · n^0.35 · (1+0.7|dBz/dt|) · (1+0.4·dPd/dt) · ln(1+t_{Bz<0})
+  // Nihai "tek formül" — güç + ani değişim + basınç şoku + negatif Bz süresi
+  const F_final = Math.pow(V, 1.5) * Math.pow(absBz, 1.6) * Math.pow(safeN, 0.35)
+                * (1 + 0.7 * Math.abs(dBzdt))
+                * (1 + 0.4 * Math.max(dPddt, 0))
+                * logTBz;
+
+  // ── Active F: F_final is primary; legacy variants kept for comparison ───────
+  const F       = F_final;
+  const fLabel  = "F_final";
 
   // ── Risk scores ────────────────────────────────────────────────────────────
   // GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)
@@ -170,10 +175,11 @@ function physicsCalc(
   const sLvl = satR < 0.25 ? "success" : satR < 0.50 ? "warning" : "danger";
 
   return {
-    F, F_new, F_shock, F_advanced, F_CME,
+    F, F_new, F_shock, F_advanced, F_CME, F_final,
     fmtF: fmt(F), fLabel,
     gpsR, satR, Pd, fLvl, gLvl, sLvl,
     dBzdt, d2Bzdt2, tBzNeg, dPddt, shockP,
+    absBz, V, n, Fluxp,
   };
 }
 
@@ -609,36 +615,80 @@ export function AiInsightCard({
               </div>
             </div>
 
-            {/* 4 F variants mini-table */}
+            {/* F variants mini-table — F_final aktif (birleşik nihai formül) */}
             {[
-              { label: "F_new",      v: phy.F_new,      note: "temel" },
-              { label: "F_şok",      v: phy.F_shock,    note: `Pd×${phy.dPddt > 0 ? "+" : ""}${phy.dPddt.toFixed(1)} nPa/h` },
-              { label: "F_adv",      v: phy.F_advanced, note: `d²Bz=${phy.d2Bzdt2.toFixed(1)}` },
-              { label: "F_CME",      v: phy.F_CME,      note: `Şok×${phy.shockP.toFixed(1)}` },
+              { label: "F_final", v: phy.F_final, note: "nihai" },
+              { label: "F_new",   v: phy.F_new,   note: "temel" },
+              { label: "F_şok",   v: phy.F_shock, note: `dPd=${phy.dPddt > 0 ? "+" : ""}${phy.dPddt.toFixed(1)}` },
+              { label: "F_adv",   v: phy.F_advanced, note: `d²Bz=${phy.d2Bzdt2.toFixed(1)}` },
+              { label: "F_CME",   v: phy.F_CME,   note: `Şok×${phy.shockP.toFixed(1)}` },
             ].map(({ label, v, note }) => {
               const fmtV = v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"k" : v.toFixed(0);
               const logPct = Math.min(100, Math.log10(Math.max(v, 1)) / Math.log10(2e6) * 100);
-              const active = label === phy.fLabel || (label === "F_new" && phy.fLabel === "F_new");
+              const active = label === "F_final";
               const lvlColor = v < 80_000 ? "bg-success" : v < 400_000 ? "bg-warning" : "bg-danger";
               const txtColor = v < 80_000 ? "text-success" : v < 400_000 ? "text-warning" : "text-danger";
               return (
                 <div key={label} className={cn(
                   "flex items-center gap-1.5 rounded px-1",
-                  active ? "bg-accent/8 outline outline-[0.5px] outline-accent/30" : ""
+                  active ? "bg-accent/10 outline outline-[0.5px] outline-accent/40" : ""
                 )}>
-                  <span className={cn("text-[8px] font-mono w-[38px] shrink-0", active ? "text-accent" : "text-muted-foreground/60")}>
+                  <span className={cn("text-[8px] font-mono w-[42px] shrink-0", active ? "text-accent font-bold" : "text-muted-foreground/55")}>
                     {label}
                   </span>
                   <div className="flex-1 h-[3px] bg-white/8 rounded-full overflow-hidden">
-                    <div className={cn("h-full rounded-full", lvlColor)} style={{ width: `${logPct}%` }} />
+                    <div className={cn("h-full rounded-full", active ? lvlColor : "bg-white/20")} style={{ width: `${logPct}%` }} />
                   </div>
-                  <span className={cn("text-[8px] font-mono w-8 text-right shrink-0", active ? txtColor : "text-muted-foreground/50")}>
+                  <span className={cn("text-[8px] font-mono w-8 text-right shrink-0", active ? txtColor : "text-muted-foreground/45")}>
                     {fmtV}
                   </span>
-                  <span className="text-[7px] font-mono text-muted-foreground/40 w-[60px] text-right shrink-0 truncate">{note}</span>
+                  <span className="text-[7px] font-mono text-muted-foreground/35 w-[52px] text-right shrink-0 truncate">{note}</span>
                 </div>
               );
             })}
+
+            {/* En Etkili Faktörler — katkı barları */}
+            <div className="border-t border-accent/15 pt-1.5 mt-0.5">
+              <div className="text-[8px] font-display text-accent/60 uppercase tracking-widest mb-1">En Etkili Faktörler</div>
+              {(() => {
+                const factors = [
+                  {
+                    label: `|Bz| = ${phy.absBz.toFixed(1)} nT`,
+                    note: "güney Bz",
+                    pct: Math.min(1, phy.absBz / 30),
+                    color: phy.absBz > 15 ? "bg-danger" : phy.absBz > 5 ? "bg-warning" : "bg-success",
+                  },
+                  {
+                    label: `dBz/dt = ${phy.dBzdt.toFixed(1)} nT/5dk`,
+                    note: "değişim hızı",
+                    pct: Math.min(1, Math.abs(phy.dBzdt) / 8),
+                    color: Math.abs(phy.dBzdt) > 4 ? "bg-danger" : Math.abs(phy.dBzdt) > 1.5 ? "bg-warning" : "bg-success",
+                  },
+                  {
+                    label: `V = ${phy.V.toFixed(0)} km/s`,
+                    note: "güneş rüzgarı",
+                    pct: Math.min(1, phy.V / 800),
+                    color: phy.V > 600 ? "bg-danger" : phy.V > 400 ? "bg-warning" : "bg-success",
+                  },
+                  {
+                    label: `t_Bz<0 = ${phy.tBzNeg < 1 ? `${(phy.tBzNeg*60).toFixed(0)}dk` : `${phy.tBzNeg.toFixed(1)}s`}`,
+                    note: "negatif Bz süresi",
+                    pct: Math.min(1, phy.tBzNeg / 6),
+                    color: phy.tBzNeg > 3 ? "bg-danger" : phy.tBzNeg > 1 ? "bg-warning" : "bg-success",
+                  },
+                ].sort((a, b) => b.pct - a.pct);
+                return factors.map((f, i) => (
+                  <div key={i} className="flex items-center gap-1.5 mb-[3px]">
+                    <span className="text-[7px] font-mono text-muted-foreground/60 w-[90px] shrink-0 truncate">{f.label}</span>
+                    <div className="flex-1 h-[5px] bg-white/8 rounded-full overflow-hidden">
+                      <div className={cn("h-full rounded-full transition-all", f.color)} style={{ width: `${f.pct * 100}%` }} />
+                    </div>
+                    <span className="text-[7px] font-mono text-muted-foreground/45 w-[26px] text-right shrink-0">{(f.pct*100).toFixed(0)}%</span>
+                    <span className="text-[6px] font-mono text-muted-foreground/30 w-[50px] text-right shrink-0 truncate">{f.note}</span>
+                  </div>
+                ));
+              })()}
+            </div>
 
             {/* t_{Bz<0} info line */}
             <div className="text-[7px] font-mono text-muted-foreground/50 pt-0.5">

@@ -359,6 +359,19 @@ function calcFCME(V: number, Bz: number, n: number, shockP: number, tBzNeg: numb
 }
 
 /**
+ * F_final = V^1.5 · |Bz|^1.6 · n^0.35 · (1+0.7|dBz/dt|) · (1+0.4·dPd/dt) · ln(1+t_{Bz<0})
+ * Nihai birleşik formül: güç + ani değişim + basınç şoku + negatif Bz süresi
+ */
+function calcFFinal(V: number, Bz: number, n: number, dBzdt: number, dPddt: number, tBzNeg: number): number {
+  const absBz  = Math.max(Math.abs(Bz), 0.01);
+  const logTBz = Math.log(1 + Math.max(tBzNeg, 0.05));
+  return Math.pow(V, 1.5) * Math.pow(absBz, 1.6) * Math.pow(Math.max(n, 0.01), 0.35)
+       * (1 + 0.7 * Math.abs(dBzdt))
+       * (1 + 0.4 * Math.max(dPddt, 0))
+       * logTBz;
+}
+
+/**
  * GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)
  * 0–1 normalize edilmiş. >0.5 = uyarı, >0.75 = kritik.
  */
@@ -531,12 +544,11 @@ export default function AviationPage() {
     const F_shock    = calcFShock(F_new, dPddt);
     const F_advanced = calcFAdvanced(F_new, d2Bzdt2);
     const F_CME      = calcFCME(speed, bz, density, shockP, tBzNeg);
+    const F_final    = calcFFinal(speed, bz, density, dBzdt, dPddt, tBzNeg);
 
-    // Active F selection
-    const isCMELike   = shockP > 2 && Fluxp > 5;
-    const isShockLike = dPddt  > 2;
-    const F       = isCMELike ? F_CME : isShockLike ? F_shock : F_new;
-    const fLabel  = isCMELike ? "F_CME" : isShockLike ? "F_şok" : "F_new";
+    // F_final is the primary active formula (unified: power + shock + Bz duration)
+    const F      = F_final;
+    const fLabel = "F_final";
 
     // F log-scale normalisation
     const fNorm = Math.min(1, Math.log10(Math.max(F, 1)) / Math.log10(2_000_000));
@@ -554,7 +566,7 @@ export default function AviationPage() {
     const satTerm3 = 0.2 * (Math.abs(Dst) / 200);
 
     return {
-      F, F_new, F_shock, F_advanced, F_CME, fLabel, fNorm,
+      F, F_new, F_shock, F_advanced, F_CME, F_final, fLabel, fNorm,
       gpsR, gpsTerm1, gpsTerm2, gpsTerm3,
       satR, satTerm1, satTerm2, satTerm3,
       Pd, Fluxp, Dst, dPddt, d2Bzdt2, tBzNeg, shockP,
@@ -709,25 +721,20 @@ export default function AviationPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-            {/* F coupling function — active variant */}
+            {/* F_final coupling function — nihai birleşik formül */}
             <PhysicsCard
               icon={<Zap className="w-4 h-4" />}
-              label={`Kuplaj Fonksiyonu (${physics.fLabel})`}
-              formulaLabel={
-                physics.fLabel === "F_CME"
-                  ? "F_CME = V¹·⁵·|Bz|¹·⁴·n⁰·⁵·ShockP⁰·⁸·ln(1+t)"
-                  : physics.fLabel === "F_şok"
-                  ? "F_şok = F_new·(1 + 0.4·dPd/dt)"
-                  : "F_new = V¹·⁴·|Bz|¹·⁵·n⁰·³·(1+0.6|dBz/dt|)·ln(1+t)"
-              }
+              label="Kuplaj Fonksiyonu (F_final)"
+              formulaLabel="F_final = V¹·⁵·|Bz|¹·⁶·n⁰·³⁵·(1+0.7|dBz/dt|)·(1+0.4·dPd/dt)·ln(1+t)"
               value={fmtF(physics.F)}
               pct={physics.fNorm}
               level={fLevel(physics.F)}
               terms={[
-                { label: `V¹·⁴  (${speed} km/s)`,        value: Math.pow(speed, 1.4).toFixed(0),      pct: Math.min(1, speed / 800) },
-                { label: `|Bz|¹·⁵ (${Math.abs(bz).toFixed(1)} nT)`, value: Math.pow(Math.max(Math.abs(bz),0.01),1.5).toFixed(2), pct: Math.min(1, Math.abs(bz) / 20) },
-                { label: `n⁰·³  (${density.toFixed(1)} p/cm³)`, value: Math.pow(Math.max(density,0.01),0.3).toFixed(2), pct: Math.min(1, density / 30) },
-                { label: `dBz/dt (${dBzdt.toFixed(2)} nT/5dk)`, value: `×${(1 + 0.6 * Math.abs(dBzdt)).toFixed(2)}`, pct: Math.min(1, Math.abs(dBzdt) / 5) },
+                { label: `V¹·⁵  (${speed} km/s)`,         value: Math.pow(speed, 1.5).toFixed(0),                       pct: Math.min(1, speed / 800) },
+                { label: `|Bz|¹·⁶ (${Math.abs(bz).toFixed(1)} nT)`, value: Math.pow(Math.max(Math.abs(bz),0.01),1.6).toFixed(2), pct: Math.min(1, Math.abs(bz) / 20) },
+                { label: `n⁰·³⁵  (${density.toFixed(1)} p/cm³)`,    value: Math.pow(Math.max(density,0.01),0.35).toFixed(2),      pct: Math.min(1, density / 30) },
+                { label: `(1+0.7|dBz/dt|) dt=${dBzdt.toFixed(2)}`,   value: `×${(1 + 0.7 * Math.abs(dBzdt)).toFixed(2)}`,          pct: Math.min(1, Math.abs(dBzdt) / 5) },
+                { label: `(1+0.4·dPd/dt) dPd=${physics.dPddt.toFixed(1)}`, value: `×${(1 + 0.4 * Math.max(physics.dPddt,0)).toFixed(2)}`, pct: Math.min(1, Math.max(physics.dPddt,0) / 5) },
                 { label: `ln(1+t_Bz<0)  t=${(physics.tBzNeg*60).toFixed(0)}dk`, value: Math.log(1+Math.max(physics.tBzNeg,0.05)).toFixed(3), pct: Math.min(1, physics.tBzNeg / 6) },
               ]}
             />
