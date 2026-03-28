@@ -766,7 +766,7 @@ export function AiInsightCard({
                   <div className={cn("text-lg font-mono font-bold", noaaColor)}>Kp {noaaKp.toFixed(1)}</div>
                 </div>
                 <div className="bg-white/5 rounded p-2">
-                  <div className="text-[10px] font-display text-muted-foreground mb-0.5">Bizim Model (1s)</div>
+                  <div className="text-[10px] font-display text-muted-foreground mb-0.5">YZ Model (1s)</div>
                   <div className={cn("text-lg font-mono font-bold", modelColor)}>Kp {modelKp.toFixed(1)}</div>
                 </div>
               </div>
