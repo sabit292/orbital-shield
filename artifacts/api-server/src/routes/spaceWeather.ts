@@ -366,7 +366,9 @@ function calcRiskValues(
   // R_sat   = 100 × (0.5S + 0.5P_n) × G × 0.9   (uydu: S + proton flux)
   // R_comm  = 100 × (0.4Kp_n + 0.3Bz_n + 0.3P_n) × G × 0.8  (GPS/HF/haberleşme)
   const G = 1.0;
-  const R_grid  = Math.round(Math.min(100, Math.max(0, 100 * S * G * 0.8)));
+  const R_grid_raw = 100 * S * G * 0.8;
+  // R_final = 100 / (1 + e^(-0.08·(R_grid - 50))) — lojistik sigmoid dönüşümü
+  const R_grid  = Math.round(100 / (1 + Math.exp(-0.08 * (R_grid_raw - 50))));
   const R_sat   = Math.round(Math.min(100, Math.max(0, 100 * (0.5 * S + 0.5 * P_n) * G * 0.9)));
   const R_comm  = Math.round(Math.min(100, Math.max(0, 100 * (0.4 * Kp_n + 0.3 * Bz_n + 0.3 * P_n) * G * 0.8)));
 

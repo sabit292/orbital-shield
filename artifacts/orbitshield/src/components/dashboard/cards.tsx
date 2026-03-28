@@ -1169,6 +1169,9 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
         <div className="text-[8.5px] font-mono text-muted-foreground/35 leading-relaxed">
           GPS/HF: 100·(0.4Kp+0.3Bz↓+0.3P)·0.8 · Uydu: 100·(0.5S+0.5P)·0.9
         </div>
+        <div className="text-[8.5px] font-mono text-muted-foreground/35 leading-relaxed">
+          Şebeke: 100/(1+e^(-0.08·(R-50))) sigmoid
+        </div>
         <div className="flex items-center gap-1.5 mt-1">
           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
           <span className="text-[8.5px] font-mono text-muted-foreground/40 uppercase tracking-wider">
