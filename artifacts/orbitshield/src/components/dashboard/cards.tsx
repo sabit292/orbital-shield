@@ -92,7 +92,49 @@ export function KpCard({ data, pred }: { data?: SpaceWeatherData; pred?: AIPredi
 }
 
 // --- AI INSIGHT CARD ---
-export function AiInsightCard({ pred }: { pred?: AIPrediction }) {
+// ── Physics engine (used by AI card) ─────────────────────────────────────────
+function physicsCalc(
+  V: number, Bz: number, n: number, Kp: number,
+  Dst: number, Fluxp: number, dBzdt: number
+) {
+  // F = V^1.5 · |Bz|^1.2 · n^0.3 · (1 + 0.5·|dBz/dt|)
+  const F = Math.pow(V, 1.5) * Math.pow(Math.max(Math.abs(Bz), 0.01), 1.2)
+          * Math.pow(Math.max(n, 0.01), 0.3) * (1 + 0.5 * Math.abs(dBzdt));
+
+  // GPSrisk = 0.5·(|Bz|/20) + 0.3·(V/1000) + 0.2·(Kp/9)
+  const gpsR = 0.5 * (Math.abs(Bz) / 20) + 0.3 * (V / 1000) + 0.2 * (Kp / 9);
+
+  // SATrisk = 0.4·(Pd/50) + 0.4·(Fluxp/1000) + 0.2·(|Dst|/200)
+  // Pd (nPa) = 1.67e-6 · n · V²
+  const Pd  = 1.67e-6 * n * V * V;
+  const satR = 0.4 * (Pd / 50) + 0.4 * (Math.max(Fluxp, 0) / 1000) + 0.2 * (Math.abs(Dst) / 200);
+
+  const fmtF = (f: number) =>
+    f >= 1e6 ? (f / 1e6).toFixed(2) + "M" : f >= 1e3 ? (f / 1e3).toFixed(1) + "k" : f.toFixed(0);
+
+  const fLvl = F < 80_000 ? "success" : F < 400_000 ? "warning" : "danger";
+  const gLvl = gpsR < 0.25 ? "success" : gpsR < 0.50 ? "warning" : "danger";
+  const sLvl = satR < 0.25 ? "success" : satR < 0.50 ? "warning" : "danger";
+
+  return { F, fmtF: fmtF(F), gpsR, satR, Pd, fLvl, gLvl, sLvl };
+}
+
+function PhysiBar({ label, pct, lvl }: { label: string; pct: number; lvl: string }) {
+  const bar = lvl === "danger" ? "bg-danger" : lvl === "warning" ? "bg-warning" : "bg-success";
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[9px] font-mono text-muted-foreground w-[72px] shrink-0 truncate">{label}</span>
+      <div className="flex-1 h-1 bg-white/8 rounded-full overflow-hidden">
+        <div className={cn("h-full rounded-full", bar)} style={{ width: `${Math.min(100, pct * 100)}%` }} />
+      </div>
+      <span className={cn("text-[9px] font-mono w-8 text-right shrink-0",
+        lvl === "danger" ? "text-danger" : lvl === "warning" ? "text-warning" : "text-success"
+      )}>{(pct * 100).toFixed(0)}%</span>
+    </div>
+  );
+}
+
+export function AiInsightCard({ pred, data }: { pred?: AIPrediction; data?: SpaceWeatherData }) {
   if (!pred) return <Panel title="YAPAY ZEKA ANALİZİ" className="min-h-[150px]" />;
 
   const getRiskColor = (level: string) => {
@@ -106,6 +148,17 @@ export function AiInsightCard({ pred }: { pred?: AIPrediction }) {
     t === "RISING" ? "↑ ARTIYOR" : t === "FALLING" ? "↓ AZALIYOR" : "→ STABIL";
   const trendClr = (t?: string) =>
     t === "RISING" ? "text-danger" : t === "FALLING" ? "text-success" : "text-primary";
+
+  // Physics calculations from real NOAA data
+  const phy = data ? physicsCalc(
+    data.solarWind.speed,
+    data.magneticField.bz,
+    data.solarWind.density,
+    data.kpIndex,
+    data.dstIndex ?? 0,
+    data.protonFlux ?? 5,
+    0   // dBzdt — single snapshot, 0 default
+  ) : null;
 
   return (
     <Panel title="YAPAY ZEKA ANALİZİ" icon={<Zap className="w-4 h-4 text-accent" />}>
@@ -136,6 +189,37 @@ export function AiInsightCard({ pred }: { pred?: AIPrediction }) {
             <div className="text-xs font-bold font-mono text-warning">{pred.stormProbability24h ?? 0}%</div>
           </div>
         </div>
+
+        {/* Physics Engine block */}
+        {phy && (
+          <div className="bg-black/40 border border-accent/20 rounded p-2 space-y-1.5">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[9px] font-display text-accent/80 uppercase tracking-widest">Fizik Motoru</span>
+              <span className={cn("text-[9px] font-mono font-bold",
+                phy.fLvl === "danger" ? "text-danger" : phy.fLvl === "warning" ? "text-warning" : "text-success"
+              )}>F={phy.fmtF}</span>
+            </div>
+            {/* F formula row */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] font-mono text-muted-foreground w-[72px] shrink-0">F (kuplaj)</span>
+              <div className="flex-1 h-1 bg-white/8 rounded-full overflow-hidden">
+                <div className={cn("h-full rounded-full",
+                  phy.fLvl === "danger" ? "bg-danger" : phy.fLvl === "warning" ? "bg-warning" : "bg-success"
+                )} style={{ width: `${Math.min(100, Math.log10(Math.max(phy.F, 1)) / Math.log10(2e6) * 100)}%` }} />
+              </div>
+              <span className={cn("text-[9px] font-mono w-8 text-right shrink-0",
+                phy.fLvl === "danger" ? "text-danger" : phy.fLvl === "warning" ? "text-warning" : "text-success"
+              )}>{phy.fmtF}</span>
+            </div>
+            {/* GPS risk */}
+            <PhysiBar label="GPSrisk" pct={phy.gpsR} lvl={phy.gLvl} />
+            {/* SAT risk */}
+            <PhysiBar label="SATrisk" pct={phy.satR} lvl={phy.sLvl} />
+            <div className="text-[8px] font-mono text-muted-foreground/50 pt-0.5 leading-relaxed">
+              GPS=0.5·|Bz|/20+0.3·V/1k+0.2·Kp/9 · SAT=0.4·Pd/50+0.4·Fp/1k+0.2·|Dst|/200
+            </div>
+          </div>
+        )}
 
         {/* Kp Tahmin sırası */}
         <div className="bg-black/30 border border-white/5 rounded p-2">

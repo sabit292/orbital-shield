@@ -460,12 +460,15 @@ export default function AviationPage() {
     return () => clearInterval(t);
   }, []);
 
-  const kp     = current?.kpIndex ?? 0;
-  const bz     = current?.solarWind?.bz ?? 0;
-  const speed  = current?.solarWind?.speed ?? 400;
+  const kp      = current?.kpIndex ?? 0;
+  const bz      = current?.solarWind?.bz ?? 0;
+  const speed   = current?.solarWind?.speed ?? 400;
   const density = current?.solarWind?.density ?? 5;
-  const xray   = current?.xrayFlux?.current ?? 0;
-  const avRisk = risk?.aviation ?? 0;
+  const xray    = current?.xrayFlux?.current ?? 0;
+  const avRisk  = risk?.aviation ?? 0;
+  // Real NOAA values for SATrisk formula (from ExtraDataCard sources)
+  const dstIndex  = (current as any)?.dstIndex ?? 0;          // nT
+  const protonFlux = (current as any)?.protonFlux ?? 5;       // pfu
 
   // Track previous Bz for dBz/dt (rate of change)
   const prevBzRef = useRef<number>(bz);
@@ -484,12 +487,16 @@ export default function AviationPage() {
     const gpsTerm3 = 0.2 * (kp / 9);
 
     // SATrisk = 0.4·(Pd/50) + 0.4·(Fluxp/1000) + 0.2·(|Dst|/200)
-    const { sat: satR, Pd, Fluxp, Dst } = calcSATrisk(density, speed, kp);
+    // Use REAL Dst and protonFlux from NOAA API; Pd computed from density & speed
+    const Pd      = 1.67e-6 * density * speed * speed;            // nPa
+    const Fluxp   = Math.max(protonFlux, 0);                      // pfu — real API value
+    const Dst     = dstIndex;                                      // nT  — real API value
+    const satR    = 0.4 * (Pd / 50) + 0.4 * (Fluxp / 1000) + 0.2 * (Math.abs(Dst) / 200);
     const satTerm1 = 0.4 * (Pd / 50);
     const satTerm2 = 0.4 * (Fluxp / 1000);
     const satTerm3 = 0.2 * (Math.abs(Dst) / 200);
 
-    // F normalization for gauge (quiet ~10k, extreme ~2M → log scale)
+    // F normalization (log scale: quiet ~10k → 0.25, extreme ~2M → 1.0)
     const fNorm = Math.min(1, Math.log10(Math.max(F, 1)) / Math.log10(2_000_000));
 
     return {
@@ -498,7 +505,7 @@ export default function AviationPage() {
       satR, satTerm1, satTerm2, satTerm3,
       Pd, Fluxp, Dst,
     };
-  }, [bz, speed, density, kp, dBzdt]);
+  }, [bz, speed, density, kp, dBzdt, dstIndex, protonFlux]);
 
   // Metric levels — GPS now driven by physics formula
   const hfLevel:    StatusLevel = kpToLevel(kp, [3, 5, 7]);
