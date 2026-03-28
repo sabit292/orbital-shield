@@ -425,9 +425,10 @@ function calcRiskValues(
 
 router.get("/current", async (req, res) => {
   try {
+    // NOAA DSCOVR/ACE gerçek zamanlı endpointler (plasma-1-hour & mag-1-hour artık 404)
     const [plasma, mag, xray, kpData, solarFluxData, protonData, dstData] = await Promise.allSettled([
-      fetchJSON("https://services.swpc.noaa.gov/products/solar-wind/plasma-1-hour.json"),
-      fetchJSON("https://services.swpc.noaa.gov/products/solar-wind/mag-1-hour.json"),
+      fetchJSON("https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json"),
+      fetchJSON("https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json"),
       fetchJSON("https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json"),
       fetchJSON("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"),
       fetchJSON("https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json"),
@@ -440,23 +441,35 @@ router.get("/current", async (req, res) => {
     let xrayFlux = 1e-8, xrayShort = 5e-9, xrayLong = 1e-8;
     let kp = 2.3, dst = -15, sunspot = 85, f107 = 145;
 
+    // rtsw_wind_1m.json → array of objects: {proton_speed, proton_density, proton_temperature, ...}
     if (plasma.status === "fulfilled") {
-      const arr = plasma.value as string[][];
-      const last = arr[arr.length - 1];
-      speed = parseFloat(last[2]) || 450;
-      density = parseFloat(last[1]) || 8;
-      temp = parseFloat(last[3]) || 120000;
-      pressure = parseFloat(last[4] ?? "2") || 2.0;
+      const arr = plasma.value as Array<{
+        proton_speed?: number; proton_density?: number; proton_temperature?: number; active?: boolean;
+      }>;
+      // En son "active" kaydı tercih et, yoksa son kayıt
+      const last = arr.slice().reverse().find(r => r.active !== false) ?? arr[arr.length - 1];
+      if (last) {
+        speed   = isFinite(last.proton_speed   ?? NaN) ? last.proton_speed!   : 450;
+        density = isFinite(last.proton_density  ?? NaN) ? last.proton_density! : 8;
+        temp    = isFinite(last.proton_temperature ?? NaN) ? last.proton_temperature! : 120000;
+        pressure = parseFloat((density * speed * speed * 1.67e-27 * 1e6 / 1e-9).toFixed(2)) || 2.0;
+      }
     }
+    // rtsw_mag_1m.json → array of objects: {bz_gsm, bx_gsm, by_gsm, bt, theta_gsm, phi_gsm, ...}
     if (mag.status === "fulfilled") {
-      const arr = mag.value as string[][];
-      const last = arr[arr.length - 1];
-      bx = parseFloat(last[1]) || 1;
-      by = parseFloat(last[2]) || -1;
-      bz = parseFloat(last[3]) || -2;
-      bt = parseFloat(last[6]) || 8;
-      phi = parseFloat(last[4]) || 180;
-      theta = parseFloat(last[5]) || -15;
+      const arr = mag.value as Array<{
+        bz_gsm?: number; bx_gsm?: number; by_gsm?: number; bt?: number;
+        theta_gsm?: number; phi_gsm?: number; active?: boolean;
+      }>;
+      const last = arr.slice().reverse().find(r => r.active !== false) ?? arr[arr.length - 1];
+      if (last) {
+        bx    = isFinite(last.bx_gsm    ?? NaN) ? last.bx_gsm!    : 1;
+        by    = isFinite(last.by_gsm    ?? NaN) ? last.by_gsm!    : -1;
+        bz    = isFinite(last.bz_gsm    ?? NaN) ? last.bz_gsm!    : -2;
+        bt    = isFinite(last.bt        ?? NaN) ? last.bt!        : 8;
+        phi   = isFinite(last.phi_gsm   ?? NaN) ? last.phi_gsm!   : 180;
+        theta = isFinite(last.theta_gsm ?? NaN) ? last.theta_gsm! : -15;
+      }
     }
     if (xray.status === "fulfilled") {
       const arr = xray.value as Array<{ flux?: string | number }>;
