@@ -699,82 +699,212 @@ router.get("/alerts", async (req, res) => {
   }
 });
 
+// ─── Infrastructure Risk — Pure NOAA Data ─────────────────────────────────
+// Altyapı risk skorları yalnızca NOAA resmi endekslerinden türetilir.
+// Her istekte canlı NOAA verisi çekilir; calcRiskValues / aiPredict kullanılmaz.
+//
+// Resmi NOAA ölçekleri (kaynak: swpc.noaa.gov/noaa-scales-explanation):
+//   G-ölçeği (jeomanyetik fırtına) → Kp'ye göre: G1=Kp5, G2=Kp6, G3=Kp7, G4=Kp8, G5=Kp9
+//   S-ölçeği (güneş radyasyon fırtınası) → ≥10 MeV proton akısı (pfu)
+//   R-ölçeği (radyo karartması) → GOES uzun dalga X-ışını akısı (0.1-0.8 nm)
+//
+// Tahmin (predicted1h/3h): NOAA resmi Kp tahmini; S ve R sabit kabul edilir.
+
 router.get("/infrastructure-risk", async (_req, res) => {
-  let kp = 2.3, bz = -2, speed = 450, density = 8, temp = 120000, xrayFlux = 1e-8, bt = 8, dst = -15, protonFlux10 = 0.1;
-  if (lastRawFeatures.length >= 8) [speed, bz, density, temp, xrayFlux, bt, dst, protonFlux10] = lastRawFeatures;
-  else if (lastRawFeatures.length >= 7) [speed, bz, density, temp, xrayFlux, bt, dst] = lastRawFeatures;
-  if (lastKpValues.length > 0) kp = lastKpValues[lastKpValues.length - 1];
+  // ── Paralel NOAA veri çekimi ────────────────────────────────────────────
+  const [plasma, mag, xray, kpNow, protonData, dstData, kpFcst] = await Promise.allSettled([
+    fetchJSON("https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json"),
+    fetchJSON("https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json"),
+    fetchJSON("https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json"),
+    fetchJSON("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"),
+    fetchJSON("https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json"),
+    fetchJSON("https://services.swpc.noaa.gov/products/kyoto-dst.json"),
+    fetchJSON("https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json"),
+  ]);
 
-  // Compute |dB/dt| (nT/min) from bzHistory — used in R_infra formula
-  const dBdt = (() => {
-    if (bzHistory.length >= 2) {
-      const a = bzHistory[bzHistory.length - 1];
-      const b = bzHistory[bzHistory.length - 2];
-      const dtMin = Math.max(0.1, (a.time - b.time) / 60000);
-      const v = Math.abs((a.value - b.value) / dtMin);
-      return isFinite(v) ? v : 0;
+  // ── Parse: güneş rüzgarı ────────────────────────────────────────────────
+  let speed = 450, density = 5, bz = -2, bt = 8;
+  if (plasma.status === "fulfilled") {
+    const arr = plasma.value as Array<{ proton_speed?: number; proton_density?: number; active?: boolean }>;
+    const rec = arr.slice().reverse().find(r => r.active !== false && r.proton_speed != null) ?? arr[arr.length - 1];
+    if (rec) {
+      speed   = isFinite(rec.proton_speed   ?? NaN) ? rec.proton_speed!   : 450;
+      density = isFinite(rec.proton_density ?? NaN) ? rec.proton_density! : 5;
     }
-    return 0;
-  })();
+  }
 
-  // Guard all inputs against NaN/Infinity before passing to formula
-  const safeKp      = isFinite(kp)      && kp >= 0      ? kp      : 2.3;
-  const safeBz      = isFinite(bz)                      ? bz      : -2;
-  const safeDst     = isFinite(dst)                     ? dst     : -15;
-  const safeSpeed   = isFinite(speed)   && speed > 0    ? speed   : 450;
-  const safeDensity = isFinite(density) && density >= 0 ? density : 5.0;
-  const safeProton  = isFinite(protonFlux10) && protonFlux10 > 0 ? protonFlux10 : 0.1;
+  // ── Parse: manyetik alan + |dBz/dt| (nT/dk) ────────────────────────────
+  let dBdt = 0;
+  if (mag.status === "fulfilled") {
+    const arr = mag.value as Array<{ bz_gsm?: number; bt?: number; active?: boolean }>;
+    const rec = arr.slice().reverse().find(r => r.active !== false && r.bz_gsm != null) ?? arr[arr.length - 1];
+    if (rec) {
+      bz = isFinite(rec.bz_gsm ?? NaN) ? rec.bz_gsm! : -2;
+      bt = isFinite(rec.bt     ?? NaN) ? rec.bt!     : 8;
+    }
+    // Son 10 geçerli ölçüm üzerinden ortalama Bz değişim hızı
+    const valid = arr.filter(r => r.bz_gsm != null).slice(-10);
+    if (valid.length >= 2) {
+      let sum = 0;
+      for (let i = 1; i < valid.length; i++) sum += Math.abs(valid[i].bz_gsm! - valid[i - 1].bz_gsm!);
+      const avg = sum / (valid.length - 1);
+      dBdt = isFinite(avg) ? avg : 0; // nT/kayıt ≈ nT/dk (1-dk örnek hızı)
+    }
+  }
 
-  // G = L × C × T hesapla (Türkiye, dinamik yerel saat)
-  const G_now = turkeyG(0);   // şimdiki saat
-  const G_1h  = turkeyG(1);   // 1 saat sonrası
-  const G_3h  = turkeyG(3);   // 3 saat sonrası
-  const T_now = turkeyT(0);
+  // ── Parse: X-ışını akısı (0.1–0.8 nm kanalı) ───────────────────────────
+  let xrayFlux = 1e-8;
+  if (xray.status === "fulfilled") {
+    const arr = xray.value as Array<{ flux?: string | number; energy?: string }>;
+    const longWave = arr.filter(r => r.energy === "0.1-0.8nm");
+    const rec = longWave[longWave.length - 1];
+    xrayFlux = parseFloat(String(rec?.flux ?? "1e-8")) || 1e-8;
+  }
 
-  // Current risk using full R = 100 × fizik bazlı kategori formülleri × G model
-  const current = calcRiskValues(safeKp, safeBz, safeSpeed, xrayFlux, safeDst, safeProton, dBdt, G_now, safeDensity);
+  // ── Parse: Kp ──────────────────────────────────────────────────────────
+  let kp = 2.3;
+  if (kpNow.status === "fulfilled") {
+    const arr = kpNow.value as string[][];
+    const last = arr[arr.length - 1];
+    kp = parseFloat(last?.[1]) || 2.3;
+  }
 
-  // AI-predicted risk for 1h and 3h using predicted Kp/conditions + future G
-  const pred = aiPredict({ kp, bz, speed, density, temp, xrayFlux, bt, dst });
+  // ── Parse: Proton akısı ≥10 MeV (pfu) ─────────────────────────────────
+  let protonFlux10 = 0.1;
+  if (protonData.status === "fulfilled") {
+    const arr = protonData.value as Array<{ time_tag: string; flux: number; energy: string }>;
+    const e10 = arr.filter(r => r.energy === ">=10 MeV");
+    if (e10.length > 0) protonFlux10 = Math.max(0.001, e10[e10.length - 1].flux);
+  }
 
-  // For predicted Bz, assume partial recovery if already low, or deepening if trend rising
-  const bzFactor1h = pred.trend === "RISING" ? 1.15 : pred.trend === "FALLING" ? 0.85 : 1.0;
-  const speedFactor1h = pred.trend === "RISING" ? 1.05 : pred.trend === "FALLING" ? 0.95 : 1.0;
+  // ── Parse: Kyoto Dst (nT) ──────────────────────────────────────────────
+  let dst = -15;
+  if (dstData.status === "fulfilled") {
+    const arr = dstData.value as string[][];
+    const rows = arr.slice(1).filter(r => r[1] !== null && r[1] !== "null" && r[1] !== "");
+    if (rows.length > 0) {
+      const v = parseFloat(rows[rows.length - 1][1]);
+      if (!isNaN(v)) dst = v;
+    }
+  }
 
-  const predicted1h = calcRiskValues(
-    pred.kp1h,
-    safeBz * bzFactor1h,
-    safeSpeed * speedFactor1h,
-    xrayFlux,
-    safeDst * bzFactor1h,
-    safeProton,
-    dBdt * bzFactor1h,
-    G_1h,
-    safeDensity
+  // ── NOAA Resmi Ölçekler ────────────────────────────────────────────────
+  // G-ölçeği  (jeomanyetik fırtına):     0–5, Kp'ye göre
+  const noaaG = kp >= 9 ? 5 : kp >= 8 ? 4 : kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0;
+  // S-ölçeği  (güneş radyasyon fırtınası): 0–5, pfu'ya göre
+  const noaaS = protonFlux10 >= 1e5 ? 5 : protonFlux10 >= 1e4 ? 4 : protonFlux10 >= 1e3 ? 3 : protonFlux10 >= 100 ? 2 : protonFlux10 >= 10 ? 1 : 0;
+  // R-ölçeği  (radyo karartması):          0–5, W/m² akısına göre
+  const noaaR = xrayFlux >= 2e-3 ? 5 : xrayFlux >= 1e-3 ? 4 : xrayFlux >= 1e-4 ? 3 : xrayFlux >= 5e-5 ? 2 : xrayFlux >= 1e-5 ? 1 : 0;
+
+  // ── Yardımcı: 0-100 aralığına kilitle ─────────────────────────────────
+  const c100 = (v: number) => Math.min(100, Math.max(0, Math.round(v)));
+  // Dst depresyon bileşeni (0 → sakin, yüksek → şiddetli halka akımı)
+  const dstComp = Math.max(0, -dst - 30) * 0.45;
+  // Hız bileşeni (500+ km/s üstü rüzgar yoğunluğu etkisi)
+  const vComp   = speed > 700 ? 12 : speed > 600 ? 7 : speed > 500 ? 3 : 0;
+
+  // ── Altyapı Risk Skorları (NOAA G/S/R ölçeklerine doğrudan bağlı) ──────
+  //
+  // Referans: NOAA SWPC "Effects" tabloları (her altyapı türü için resmi eşikler)
+
+  // Elektrik Şebekesi (GIC — Jeomanyetik İndüklenmiş Akımlar)
+  // G1: küçük dalgalanmalar | G2: gerilim ayarlaması | G3: olası kesintiler
+  // G4: yaygın kesintiler   | G5: tam çöküş riski
+  // Ek etkenler: Dst (halka akımı), |dBz/dt| (indüksiyon hızı)
+  const powerGrid = c100(noaaG * 18 + dstComp + dBdt * 3.5);
+
+  // Uydu Operasyonları (yüzey şarjı + derin dielektrik şarjı)
+  // G → yüzey şarjı (düşük enerji elektronu); S → iç radyasyon kuşağı (SEP)
+  const satelliteOps = c100(noaaG * 17 + noaaS * 17 + vComp + (bt > 15 ? 6 : 0));
+
+  // GPS / GNSS (iyonosferik soğurma + sintilayon)
+  // R → güneş tarafı HF soğurması; G → yüksek enlerde sintilayon
+  const gpsGnss = c100(noaaR * 17 + noaaG * 12 + (Math.abs(bz) > 10 ? 9 : Math.abs(bz) > 5 ? 4 : 0));
+
+  // HF Radyo İletişimi (iyonosferik karartma)
+  // R-ölçeği doğrudan etken: X-ışını iyonosferi iyonize ederek D-tabakası soğurması
+  const hfRadio = c100(noaaR * 22 + noaaG * 8 + noaaS * 6);
+
+  // Havacılık (polar güzergahlar — radyasyon dozu + HF kopması)
+  // S → polar irtifada yüksek enerji proton dozu; G → polar HF kaybı; R → iletişim
+  const aviation = c100(noaaS * 21 + noaaG * 15 + noaaR * 9 + vComp);
+
+  // İnsan Sağlığı (uçuş ekibi + astronot radyasyon dozu)
+  // S ağırlıklı; yer seviyesi korunaklı olduğundan G katkısı düşük
+  const humanHealth = c100(noaaS * 19 + noaaG * 7 + (noaaG >= 4 ? 10 : 0));
+
+  // Boru Hatları (GIC kaynaklı hızlandırılmış korozyon)
+  // Elektrik şebekesine benzer ama daha düşük taban; uzun çelik boru GIC'e hassas
+  const pipelines = c100(noaaG * 14 + dstComp * 0.9 + dBdt * 2.8);
+
+  // İnternet / Fiber Altyapısı (şebeke kaskad + uydu yer istasyonu)
+  // Bağımsız etkisi düşük; şebeke ve uydu risklerinin türevi
+  const internet = c100(noaaG * 11 + noaaS * 9 + (powerGrid > 60 ? 14 : powerGrid > 40 ? 7 : 0));
+
+  // Genel Risk (altyapı ağırlıklı ortalama)
+  const overallRisk = c100(
+    powerGrid    * 0.22 +
+    satelliteOps * 0.18 +
+    gpsGnss      * 0.16 +
+    hfRadio      * 0.14 +
+    aviation     * 0.12 +
+    pipelines    * 0.10 +
+    internet     * 0.05 +
+    humanHealth  * 0.03
   );
-  const predicted3h = calcRiskValues(
-    pred.kp3h,
-    safeBz * (bzFactor1h * 0.9 + 0.1),
-    safeSpeed * (speedFactor1h * 0.95 + 0.05),
-    xrayFlux,
-    safeDst * (bzFactor1h * 0.9 + 0.1),
-    safeProton,
-    dBdt * 0.7,
-    G_3h,
-    safeDensity
-  );
 
-  // Determine trend
-  const trendDir: "RISING" | "STABLE" | "FALLING" =
-    predicted1h.overallRisk > current.overallRisk + 3 ? "RISING" :
-    predicted1h.overallRisk < current.overallRisk - 3 ? "FALLING" : "STABLE";
+  // ── Tahmin: NOAA resmi Kp tahmini (predicted1h / predicted3h) ──────────
+  let kpFcst1h = kp, kpFcst3h = kp;
+  if (kpFcst.status === "fulfilled") {
+    const raw = kpFcst.value as string[][];
+    const now2 = Date.now();
+    const fRows = raw.slice(1)
+      .filter(r => r[2] === "predicted" && new Date(r[0]).getTime() > now2)
+      .map(r => ({ t: new Date(r[0]).getTime(), kp: parseFloat(r[1]) || kp }));
+    if (fRows.length > 0) {
+      const nearest = (ms: number) =>
+        fRows.reduce((best, p) => Math.abs(p.t - now2 - ms) < Math.abs(best.t - now2 - ms) ? p : best).kp;
+      kpFcst1h = nearest(3_600_000);
+      kpFcst3h = nearest(3 * 3_600_000);
+    }
+  }
+
+  // NOAA tahminli Kp ile altyapı risklerini yeniden hesapla (S ve R sabit)
+  function riskAtKp(fKp: number) {
+    const Gf   = fKp >= 9 ? 5 : fKp >= 8 ? 4 : fKp >= 7 ? 3 : fKp >= 6 ? 2 : fKp >= 5 ? 1 : 0;
+    const pg   = c100(Gf * 18 + dstComp + dBdt * 3.5);
+    const so   = c100(Gf * 17 + noaaS * 17 + vComp + (bt > 15 ? 6 : 0));
+    const gp   = c100(noaaR * 17 + Gf * 12 + (Math.abs(bz) > 10 ? 9 : Math.abs(bz) > 5 ? 4 : 0));
+    const hf   = c100(noaaR * 22 + Gf * 8 + noaaS * 6);
+    const av   = c100(noaaS * 21 + Gf * 15 + noaaR * 9 + vComp);
+    const hh   = c100(noaaS * 19 + Gf * 7 + (Gf >= 4 ? 10 : 0));
+    const pl   = c100(Gf * 14 + dstComp * 0.9 + dBdt * 2.8);
+    const iv   = c100(Gf * 11 + noaaS * 9 + (pg > 60 ? 14 : pg > 40 ? 7 : 0));
+    const ov   = c100(pg * 0.22 + so * 0.18 + gp * 0.16 + hf * 0.14 + av * 0.12 + pl * 0.10 + iv * 0.05 + hh * 0.03);
+    return { powerGrid: pg, satelliteOps: so, gpsGnss: gp, hfRadio: hf, aviation: av, humanHealth: hh, pipelines: pl, internet: iv, overallRisk: ov };
+  }
+
+  const predicted1h = riskAtKp(kpFcst1h);
+  const predicted3h = riskAtKp(kpFcst3h);
+
+  const trend: "RISING" | "STABLE" | "FALLING" =
+    predicted1h.overallRisk > overallRisk + 3 ? "RISING" :
+    predicted1h.overallRisk < overallRisk - 3 ? "FALLING" : "STABLE";
 
   res.json({
-    ...current,
-    predicted1h,
-    predicted3h,
-    trend: trendDir,
-    meta: { G: G_now, T: T_now, A_grid: A_GRID, L: 0.8, C: 1.0 },
+    gpsGnss, satelliteOps, powerGrid, hfRadio, aviation, humanHealth, pipelines, internet, overallRisk,
+    predicted1h, predicted3h, trend,
+    meta: {
+      // meta şemasıyla uyumluluk için Türkiye katsayıları korunuyor
+      G: turkeyG(0), T: turkeyT(0), A_grid: A_GRID, L: 0.8, C: 1.0,
+      // NOAA resmi ölçek değerleri (ek bilgi)
+      noaaG, noaaS, noaaR,
+      kp: parseFloat(kp.toFixed(2)),
+      dst: parseFloat(dst.toFixed(1)),
+      bz: parseFloat(bz.toFixed(2)),
+      xrayFlux, protonFlux10,
+      dBdt: parseFloat(dBdt.toFixed(3)),
+    },
   });
 });
 
