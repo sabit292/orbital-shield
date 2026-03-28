@@ -1176,6 +1176,16 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
           );
         })}
       </div>
+
+      {/* Formül notu */}
+      <div className="mt-3 border-t border-white/5 pt-2">
+        <div className="text-[9px] font-mono text-muted-foreground/40 leading-relaxed">
+          R = 100·(0.25·Kp/9 + 0.25·|Dst|/500 + 0.30·|dB/dt|/1000 + 0.10·V/1000 + 0.10·P/100)·L
+        </div>
+        <div className="text-[9px] font-mono text-muted-foreground/30 mt-0.5">
+          L: Türkiye=0.8 · Uydu=1.1 · HF/GPS=1.0 · Havacılık=0.9
+        </div>
+      </div>
     </Panel>
   );
 }

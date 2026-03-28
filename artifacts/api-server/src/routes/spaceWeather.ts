@@ -323,73 +323,44 @@ type RiskValues = {
   pipelines: number; internet: number; overallRisk: number;
 };
 
-// NOAA-calibrated non-linear risk function
-// Sources: NOAA Space Weather Scales (G/R/S), SWPC effects tables
-function calcRiskValues(kp: number, bz: number, speed: number, xrayFlux: number, dst: number, protonFlux10: number = 0.1): RiskValues {
-  // ── 1. NOAA G-scale (Geomagnetic) ─────────────────────────────────────────
-  // G0: Kp<5 (no storm), G1: Kp=5 (~15%), G3: Kp=7 (~55%), G5: Kp=9 (100%)
-  // Below Kp=3: essentially no infrastructure impact
-  const kpRisk = kp >= 3
-    ? Math.min(1, Math.pow((kp - 2) / 7, 1.7))   // 0% at Kp=2, 22% at Kp=5, 100% at Kp=9
-    : kp * 0.005;                                  // tiny background below Kp=3
+// Unified infrastructure risk formula (ChatGPT suggestion):
+// R_infra = 100 × (0.25·Kp/9 + 0.25·|Dst|/500 + 0.30·|dB/dt|/1000 + 0.10·V/1000 + 0.10·P/100) × L
+// L = bölgesel hassasiyet katsayısı (regional sensitivity factor)
+//   L=1.0 referans, Türkiye orta-düşük risk L=0.7–0.9
+function calcRiskValues(
+  kp: number, _bz: number, speed: number, _xrayFlux: number, dst: number,
+  protonFlux10: number = 0.1, dBdt: number = 0
+): RiskValues {
+  // Sanitize all inputs — NaN or ±Infinity must never reach the formula
+  const safeVal = (v: number, fallback: number) => (isFinite(v) ? v : fallback);
+  kp          = safeVal(kp, 2.3);
+  speed       = safeVal(speed, 450);
+  dst         = safeVal(dst, -15);
+  protonFlux10 = safeVal(protonFlux10, 0.1);
+  dBdt        = safeVal(dBdt, 0);
 
-  // ── 2. Southward Bz (opens magnetosphere above −5 nT threshold) ───────────
-  // Significant below -5 nT, severe below -20 nT
-  const bzRisk = bz < -5
-    ? Math.min(1, Math.pow((-bz - 5) / 20, 1.4))  // 0% at -5, 14% at -10, 100% at -25
-    : 0;
+  // Normalize each term to 0–1
+  const kpTerm     = Math.min(1, Math.max(0, kp / 9));
+  const dstTerm    = Math.min(1, Math.max(0, Math.abs(dst) / 500));
+  const dBdtTerm   = Math.min(1, Math.max(0, Math.abs(dBdt) / 1000));
+  const speedTerm  = Math.min(1, Math.max(0, speed / 1000));
+  const protonTerm = Math.min(1, Math.max(0, protonFlux10 / 100));
 
-  // ── 3. Solar wind speed (elevated > 500 km/s) ─────────────────────────────
-  // Quiet: 300–450 km/s, Elevated: 500–700 km/s, Extreme: >800 km/s
-  const speedRisk = speed >= 500
-    ? Math.min(1, Math.pow((speed - 500) / 300, 1.8)) // 0% at 500, 20% at 600, 100% at 800
-    : Math.max(0, (speed - 350) / 150) * 0.04;        // ≤4% background below 500 km/s
+  // Weighted base score (sum of weights = 1.00)
+  const base = 0.25 * kpTerm + 0.25 * dstTerm + 0.30 * dBdtTerm + 0.10 * speedTerm + 0.10 * protonTerm;
 
-  // ── 4. NOAA R-scale (Radio blackouts) ─────────────────────────────────────
-  // Piecewise calibration against NOAA R-scale thresholds:
-  // A/B class (<1e-6): <2%, C class (1e-6–1e-5): 2–8%, M1 (1e-5): ~15%
-  // X1 (1e-4): ~55%, X10 (1e-3): ~85%, X20+ (2e-3): 100%
-  let xrayRisk: number;
-  if (xrayFlux >= 2e-3)      xrayRisk = 1.00;
-  else if (xrayFlux >= 1e-3) xrayRisk = 0.85 + ((xrayFlux - 1e-3) / 1e-3) * 0.15;
-  else if (xrayFlux >= 1e-4) xrayRisk = 0.55 + ((xrayFlux - 1e-4) / 9e-4) * 0.30;
-  else if (xrayFlux >= 1e-5) xrayRisk = 0.15 + ((xrayFlux - 1e-5) / 9e-5) * 0.40;
-  else if (xrayFlux >= 1e-6) xrayRisk = 0.02 + ((xrayFlux - 1e-6) / 9e-6) * 0.13;
-  else                       xrayRisk = Math.max(0, (Math.log10(Math.max(xrayFlux, 1e-9)) + 9) / 3) * 0.02;
+  const R = (L: number) => Math.round(Math.min(100, Math.max(0, 100 * base * L)));
 
-  // ── 5. Dst (geomagnetic storm ring current) ────────────────────────────────
-  // Quiet: > -20 nT, Moderate storm: -50 nT, Severe: -100 nT, Extreme: -250 nT
-  const dstRisk = dst < -20
-    ? Math.min(1, Math.pow((-dst - 20) / 180, 1.5))   // 0% at -20, 8% at -50, 30% at -100
-    : 0;
-
-  // ── 6. NOAA S-scale (Proton flux ≥10 MeV) ─────────────────────────────────
-  // S0: <10 pfu, S1: ≥10, S2: ≥100, S3: ≥1000, S4: ≥10000, S5: ≥100000
-  const sScaleLevel = classifySScale(protonFlux10).level;
-  const protonRisk = sScaleLevel / 5; // 0.0–1.0 normalized to S-scale
-
-  const clamp = (v: number) => Math.round(Math.min(100, Math.max(0, v * 100)));
-
-  // Weights align with NOAA space weather effects documentation
   return {
-    // GPS/GNSS: ionospheric scintillation (Kp dominant), radio blackout (X-ray), Bz secondary
-    gpsGnss:      clamp(kpRisk * 0.45 + xrayRisk * 0.28 + bzRisk * 0.14 + speedRisk * 0.05 + protonRisk * 0.08),
-    // Satellites: radiation/SEP (proton + X-ray), orbital drag (Kp), surface charging (Bz)
-    satelliteOps: clamp(protonRisk * 0.30 + xrayRisk * 0.25 + kpRisk * 0.25 + speedRisk * 0.12 + bzRisk * 0.08),
-    // Power grid: GICs from Dst ring current changes + Kp; Bz drives Dst
-    powerGrid:    clamp(dstRisk * 0.50 + kpRisk * 0.35 + bzRisk * 0.10 + speedRisk * 0.05),
-    // HF Radio: D-layer absorption from X-ray (#1 cause), proton polar cap absorption, Kp
-    hfRadio:      clamp(xrayRisk * 0.55 + protonRisk * 0.20 + kpRisk * 0.17 + speedRisk * 0.05 + bzRisk * 0.03),
-    // Aviation: radiation dose (proton SEP primary for polar routes), HF comm, GPS
-    aviation:     clamp(protonRisk * 0.35 + xrayRisk * 0.28 + kpRisk * 0.20 + speedRisk * 0.10 + bzRisk * 0.07),
-    // Human health: radiation (proton SEP primary for astronauts/aircrew, then X-ray)
-    humanHealth:  clamp(protonRisk * 0.45 + xrayRisk * 0.30 + speedRisk * 0.14 + kpRisk * 0.10 + bzRisk * 0.01),
-    // Pipelines: GIC (Dst-driven, same physics as power grid)
-    pipelines:    clamp(dstRisk * 0.55 + kpRisk * 0.35 + bzRisk * 0.07 + speedRisk * 0.03),
-    // Internet/undersea cables: GIC (Dst), satellite link disruption (X-ray), SEPs (speed)
-    internet:     clamp(dstRisk * 0.40 + xrayRisk * 0.22 + kpRisk * 0.22 + protonRisk * 0.10 + speedRisk * 0.06),
-    // Overall: Kp + Bz are primary geomagnetic drivers; X-ray/proton for radio/radiation; Dst for GIC
-    overallRisk:  clamp(kpRisk * 0.30 + bzRisk * 0.22 + xrayRisk * 0.18 + protonRisk * 0.14 + speedRisk * 0.10 + dstRisk * 0.06),
+    gpsGnss:      R(1.0),   // Küresel iyonosfer — L=1.0
+    satelliteOps: R(1.1),   // Yörünge maruziyeti — L=1.1
+    powerGrid:    R(0.8),   // Türkiye şebekesi — L=0.8
+    hfRadio:      R(1.0),   // HF standart — L=1.0
+    aviation:     R(0.9),   // THY güzergahları — L=0.9
+    humanHealth:  R(0.8),   // Yer seviyesi — L=0.8
+    pipelines:    R(0.8),   // GIC, Türkiye — L=0.8
+    internet:     R(0.9),   // Karışık — L=0.9
+    overallRisk:  R(1.0),   // Referans — L=1.0
   };
 }
 
@@ -642,8 +613,26 @@ router.get("/infrastructure-risk", async (_req, res) => {
   else if (lastRawFeatures.length >= 7) [speed, bz, density, temp, xrayFlux, bt, dst] = lastRawFeatures;
   if (lastKpValues.length > 0) kp = lastKpValues[lastKpValues.length - 1];
 
-  // Current risk — now includes real GOES proton flux for S-scale
-  const current = calcRiskValues(kp, bz, speed, xrayFlux, dst, protonFlux10);
+  // Compute |dB/dt| (nT/min) from bzHistory — used in R_infra formula
+  const dBdt = (() => {
+    if (bzHistory.length >= 2) {
+      const a = bzHistory[bzHistory.length - 1];
+      const b = bzHistory[bzHistory.length - 2];
+      const dtMin = Math.max(0.1, (a.time - b.time) / 60000);
+      const v = Math.abs((a.value - b.value) / dtMin);
+      return isFinite(v) ? v : 0;
+    }
+    return 0;
+  })();
+
+  // Guard all inputs against NaN/Infinity before passing to formula
+  const safeKp    = isFinite(kp)    && kp >= 0   ? kp    : 2.3;
+  const safeDst   = isFinite(dst)               ? dst   : -15;
+  const safeSpeed = isFinite(speed) && speed > 0 ? speed : 450;
+  const safeProton = isFinite(protonFlux10) && protonFlux10 > 0 ? protonFlux10 : 0.1;
+
+  // Current risk using unified R_infra formula
+  const current = calcRiskValues(safeKp, bz, safeSpeed, xrayFlux, safeDst, safeProton, dBdt);
 
   // AI-predicted risk for 1h and 3h using predicted Kp/conditions
   const pred = aiPredict({ kp, bz, speed, density, temp, xrayFlux, bt, dst });
@@ -655,18 +644,20 @@ router.get("/infrastructure-risk", async (_req, res) => {
   const predicted1h = calcRiskValues(
     pred.kp1h,
     bz * bzFactor1h,
-    speed * speedFactor1h,
+    safeSpeed * speedFactor1h,
     xrayFlux,
-    dst * bzFactor1h,
-    protonFlux10
+    safeDst * bzFactor1h,
+    safeProton,
+    dBdt * bzFactor1h
   );
   const predicted3h = calcRiskValues(
     pred.kp3h,
     bz * (bzFactor1h * 0.9 + 0.1),
-    speed * (speedFactor1h * 0.95 + 0.05),
+    safeSpeed * (speedFactor1h * 0.95 + 0.05),
     xrayFlux,
-    dst * (bzFactor1h * 0.9 + 0.1),
-    protonFlux10
+    safeDst * (bzFactor1h * 0.9 + 0.1),
+    safeProton,
+    dBdt * 0.7
   );
 
   // Determine trend
