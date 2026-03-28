@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from "react";
+import React, { useRef, useEffect } from "react";
 import * as THREE from "three";
 import type { SpaceWeatherData, AIPrediction, InfrastructureRisk } from "@workspace/api-client-react/src/generated/api.schemas";
 
@@ -8,18 +8,17 @@ interface Globe3DProps {
   risk?: InfrastructureRisk;
 }
 
-// Affected region coordinates (lat, lon, label, system)
 const IMPACT_ZONES = [
-  { lat: 64, lon: -20,  label: "İzlanda",      system: "hfRadio",     color: 0x00f0ff },
-  { lat: 70, lon: 25,   label: "Norveç",        system: "hfRadio",     color: 0x00f0ff },
-  { lat: 65, lon: -148, label: "Alaska",        system: "powerGrid",   color: 0xffaa00 },
-  { lat: 60, lon: -95,  label: "Kanada",        system: "powerGrid",   color: 0xffaa00 },
-  { lat: 55, lon: 37,   label: "Moskova",       system: "gpsGnss",     color: 0x39ff14 },
-  { lat: 52, lon: 5,    label: "Batı Avrupa",   system: "gpsGnss",     color: 0x39ff14 },
-  { lat: 35, lon: 139,  label: "Tokyo",         system: "satelliteOps",color: 0xcc44ff },
-  { lat: 40, lon: -74,  label: "New York",      system: "aviation",    color: 0xff4444 },
-  { lat: -75, lon: 0,   label: "Antarktika",    system: "hfRadio",     color: 0x00f0ff },
-  { lat: -55, lon: -68, label: "Güney Amerika", system: "gpsGnss",     color: 0x39ff14 },
+  { lat: 64,  lon: -20,  label: "İzlanda",       system: "hfRadio",     color: 0x00f0ff },
+  { lat: 70,  lon: 25,   label: "Norveç",         system: "hfRadio",     color: 0x00f0ff },
+  { lat: 65,  lon: -148, label: "Alaska",         system: "powerGrid",   color: 0xffaa00 },
+  { lat: 60,  lon: -95,  label: "Kanada",         system: "powerGrid",   color: 0xffaa00 },
+  { lat: 55,  lon: 37,   label: "Moskova",        system: "gpsGnss",     color: 0x39ff14 },
+  { lat: 52,  lon: 5,    label: "Batı Avrupa",    system: "gpsGnss",     color: 0x39ff14 },
+  { lat: 35,  lon: 139,  label: "Tokyo",          system: "satelliteOps",color: 0xcc44ff },
+  { lat: 40,  lon: -74,  label: "New York",       system: "aviation",    color: 0xff4444 },
+  { lat: -75, lon: 0,    label: "Antarktika",     system: "hfRadio",     color: 0x00f0ff },
+  { lat: -55, lon: -68,  label: "Güney Amerika",  system: "gpsGnss",     color: 0x39ff14 },
 ];
 
 function latLonToXYZ(lat: number, lon: number, r: number): THREE.Vector3 {
@@ -32,125 +31,205 @@ function latLonToXYZ(lat: number, lon: number, r: number): THREE.Vector3 {
   );
 }
 
-// ── Shaders ────────────────────────────────────────────────────────────────
+// ── Simplified continent outlines [lat, lon] ─────────────────────────────────
+const LAND_POLYGONS: [number, number][][] = [
+  // North America
+  [
+    [71,-153],[72,-131],[75,-88],[72,-76],[63,-64],[45,-53],[45,-60],
+    [35,-75],[25,-80],[22,-90],[16,-88],[16,-92],[20,-103],[22,-110],
+    [32,-117],[38,-123],[48,-124],[55,-133],[60,-145],[65,-168],[71,-153],
+  ],
+  // Greenland
+  [
+    [83,-25],[82,-15],[80,-18],[76,-19],[72,-24],[70,-24],
+    [70,-35],[72,-40],[76,-42],[80,-40],[83,-35],[83,-25],
+  ],
+  // South America
+  [
+    [12,-72],[10,-62],[8,-60],[5,-52],[0,-50],[-5,-35],[-10,-37],
+    [-15,-40],[-23,-43],[-28,-49],[-34,-54],[-42,-63],[-54,-67],
+    [-56,-68],[-53,-74],[-42,-73],[-35,-57],[-25,-44],[-10,-37],
+    [0,-48],[5,-52],[8,-60],[12,-72],
+  ],
+  // Europe (main body)
+  [
+    [36,-8],[36,2],[43,3],[48,2],[51,2],[52,4],[55,8],
+    [58,5],[65,14],[70,20],[70,28],[65,25],[60,25],[57,22],
+    [55,18],[50,18],[48,18],[46,28],[44,28],[42,28],[40,18],
+    [38,14],[37,15],[36,10],[36,-8],
+  ],
+  // Scandinavia
+  [
+    [56,8],[58,5],[63,5],[65,14],[68,18],[70,20],[72,26],
+    [70,28],[68,28],[65,25],[60,25],[57,22],[56,8],
+  ],
+  // Africa
+  [
+    [37,10],[37,12],[33,15],[28,33],[22,37],[12,44],[12,43],
+    [5,35],[0,42],[-5,40],[-10,38],[-22,35],[-34,26],[-34,18],
+    [-29,16],[-22,14],[-17,12],[-5,10],[0,8],[5,2],[5,-5],
+    [10,-15],[15,-17],[20,-17],[22,-14],[28,-10],[33,-5],[37,10],
+  ],
+  // Asia (main body)
+  [
+    [70,28],[72,50],[73,80],[73,120],[70,130],[60,140],[55,135],
+    [50,140],[48,135],[40,127],[35,122],[25,120],[22,114],[20,110],
+    [10,105],[5,100],[5,103],[1,104],[5,100],[10,105],[15,100],
+    [20,93],[22,92],[22,88],[20,85],[14,80],[8,78],[8,77],
+    [20,70],[22,60],[25,57],[22,55],[15,45],[12,44],[22,37],
+    [28,33],[33,35],[37,36],[40,36],[38,26],[41,29],[45,30],
+    [50,30],[55,38],[60,50],[65,60],[68,70],[70,80],[70,28],
+  ],
+  // Arabian Peninsula
+  [
+    [22,55],[24,58],[22,60],[18,57],[12,44],[15,42],[22,55],
+  ],
+  // Indian Subcontinent bump
+  [
+    [22,68],[22,88],[8,78],[8,77],[20,68],[22,68],
+  ],
+  // Southeast Asia peninsula
+  [
+    [22,100],[18,100],[10,99],[5,103],[1,104],[3,106],
+    [10,105],[16,103],[20,106],[22,105],[22,100],
+  ],
+  // Australia
+  [
+    [-16,130],[-16,136],[-18,140],[-22,150],[-28,154],[-38,146],
+    [-38,140],[-34,136],[-32,128],[-28,122],[-22,114],[-20,118],[-16,130],
+  ],
+  // Japan (Honshu)
+  [
+    [41,140],[38,141],[35,136],[33,130],[34,131],[36,136],[38,141],[41,140],
+  ],
+  // UK
+  [
+    [50,-5],[52,-4],[58,-3],[60,-3],[58,0],[55,2],[52,2],[50,0],[50,-5],
+  ],
+];
 
-const earthVert = /* glsl */`
-  varying vec2 vUv;
+// ── Build canvas texture with continent fills + outlines ──────────────────────
+function buildEarthTexture(): THREE.CanvasTexture {
+  const W = 2048, H = 1024;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+
+  const toXY = (lat: number, lon: number): [number, number] => [
+    ((lon + 180) / 360) * W,
+    ((90 - lat) / 180) * H,
+  ];
+
+  // Ocean
+  ctx.fillStyle = "#020d1f";
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle lat/lon grid
+  ctx.strokeStyle = "rgba(0,80,140,0.25)";
+  ctx.lineWidth = 0.7;
+  for (let lon = -180; lon <= 180; lon += 30) {
+    const [x] = toXY(0, lon);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let lat = -90; lat <= 90; lat += 30) {
+    const [, y] = toXY(lat, 0);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Draw each continent
+  for (const poly of LAND_POLYGONS) {
+    if (poly.length < 2) continue;
+    ctx.beginPath();
+    const [sx, sy] = toXY(poly[0][0], poly[0][1]);
+    ctx.moveTo(sx, sy);
+    for (let i = 1; i < poly.length; i++) {
+      const [x, y] = toXY(poly[i][0], poly[i][1]);
+      ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+
+    // Fill — dark muted green
+    ctx.fillStyle = "#132b18";
+    ctx.fill();
+    // Border — bright cyan-green
+    ctx.strokeStyle = "#00cc70";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+  }
+
+  // Polar ice
+  const iceGrad = ctx.createLinearGradient(0, 0, 0, H * 0.08);
+  iceGrad.addColorStop(0, "rgba(180,210,230,0.45)");
+  iceGrad.addColorStop(1, "rgba(180,210,230,0)");
+  ctx.fillStyle = iceGrad;
+  ctx.fillRect(0, 0, W, H * 0.08);
+
+  const iceGrad2 = ctx.createLinearGradient(0, H * 0.92, 0, H);
+  iceGrad2.addColorStop(0, "rgba(160,200,220,0)");
+  iceGrad2.addColorStop(1, "rgba(160,200,220,0.55)");
+  ctx.fillStyle = iceGrad2;
+  ctx.fillRect(0, H * 0.92, W, H * 0.08);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// ── Atmosphere shaders (glow + aurora band) ───────────────────────────────────
+const atmoVert = /* glsl */`
   varying vec3 vNormal;
-  varying vec3 vPosition;
   void main(){
-    vUv = uv;
     vNormal = normalize(normalMatrix * normal);
-    vPosition = (modelMatrix * vec4(position, 1.0)).xyz;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
   }
 `;
-
-const earthFrag = /* glsl */`
-  uniform float uTime;
-  uniform float uKp;
-  varying vec2 vUv;
-  varying vec3 vNormal;
-
-  float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
-  float noise(vec2 p){
-    vec2 i=floor(p); vec2 f=fract(p);
-    float a=hash(i), b=hash(i+vec2(1,0)), c=hash(i+vec2(0,1)), d=hash(i+vec2(1,1));
-    vec2 u=f*f*(3.-2.*f);
-    return mix(mix(a,b,u.x),mix(c,d,u.x),u.y);
-  }
-  float fbm(vec2 p){
-    float v=0.;float a=.5;
-    for(int i=0;i<5;i++){ v+=a*noise(p); p*=2.2; a*=.5; }
-    return v;
-  }
-
-  void main(){
-    vec2 uv = vUv;
-    // Land / ocean procedural
-    float n = fbm(uv * 6.0);
-    float land = smoothstep(0.46, 0.54, n);
-
-    vec3 ocean = vec3(0.03, 0.14, 0.42);
-    vec3 shallow = vec3(0.05, 0.22, 0.55);
-    vec3 landCol = vec3(0.10, 0.32, 0.12);
-    vec3 desert  = vec3(0.45, 0.32, 0.10);
-    vec3 snow    = vec3(0.80, 0.90, 0.95);
-    float detail = fbm(uv * 14.0 + 3.0);
-    float snowPole = smoothstep(0.78, 0.92, abs(uv.y - 0.5) * 2.0);
-    vec3 terrainCol = mix(landCol, desert, smoothstep(0.3, 0.7, detail));
-    terrainCol = mix(terrainCol, snow, snowPole);
-    vec3 base = mix(mix(ocean, shallow, smoothstep(0.3,0.46,n)), terrainCol, land);
-
-    // City lights (night side) — tiny bright dots on land
-    float cityNoise = fbm(uv * 40.0 + 7.0);
-    float cityMask  = land * smoothstep(0.65, 1.0, cityNoise);
-    vec3 cityGlow   = vec3(1.0, 0.92, 0.6) * cityMask * 1.2;
-
-    // Polar aurora bands
-    float lat = (uv.y - 0.5) * 3.14159;
-    float absLat = abs(lat);
-    float auroraMinLat = mix(1.1, 0.7, smoothstep(0.0, 9.0, uKp)); // radians
-    float auroraStrip = smoothstep(auroraMinLat-0.15, auroraMinLat, absLat)
-                      * smoothstep(auroraMinLat+0.3,  auroraMinLat, absLat);
-    float auroraWave = sin(uv.x * 30.0 + uTime * 0.8) * 0.5 + 0.5;
-    float auroraWave2= sin(uv.x * 18.0 - uTime * 0.5 + 1.2) * 0.5 + 0.5;
-    float aurora = auroraStrip * mix(auroraWave, auroraWave2, 0.5) * smoothstep(0.0, 2.0, uKp);
-    vec3 auroraGreen = vec3(0.0, 1.0, 0.4);
-    vec3 auroraRed   = vec3(1.0, 0.2, 0.0);
-    vec3 auroraCol   = mix(auroraGreen, auroraRed, smoothstep(5.0, 9.0, uKp));
-
-    // Diffuse lighting — two light sources for rounder, brighter look
-    vec3 lightDir  = normalize(vec3(1.0, 0.5, 1.2));
-    vec3 lightDir2 = normalize(vec3(-0.6, 0.3, 0.8));
-    float diff  = max(0.0, dot(vNormal, lightDir));
-    float diff2 = max(0.0, dot(vNormal, lightDir2)) * 0.25;
-    float ambient = 0.28;
-    float light = ambient + diff * 0.72 + diff2;
-    // Specular shimmer on ocean
-    vec3 viewDir = normalize(vec3(0.0, 0.0, 1.0));
-    vec3 halfVec = normalize(lightDir + viewDir);
-    float spec = pow(max(0.0, dot(vNormal, halfVec)), 32.0) * (1.0 - land) * 0.35;
-
-    vec3 col = base * light + spec * vec3(0.5, 0.75, 1.0) + cityGlow * (1.0 - diff * 0.7) + auroraCol * aurora;
-    // Slight cyan tint on edges (sci-fi)
-    float rim = pow(1.0 - dot(vNormal, vec3(0,0,1)), 2.5) * 0.15;
-    col += vec3(0.0, 0.8, 1.0) * rim;
-
-    gl_FragColor = vec4(col, 1.0);
-  }
-`;
-
-const atmosphereVert = /* glsl */`
-  varying vec3 vNormal;
-  void main(){
-    vNormal = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-  }
-`;
-
-const atmosphereFrag = /* glsl */`
+const atmoFrag = /* glsl */`
   uniform float uKp;
   varying vec3 vNormal;
   void main(){
-    float intensity = pow(0.65 - dot(vNormal, vec3(0,0,1)), 2.5);
-    vec3 stormCol = mix(vec3(0.0, 0.5, 1.0), vec3(1.0, 0.15, 0.05), smoothstep(4.0, 8.0, uKp));
-    gl_FragColor = vec4(stormCol, intensity * 0.55);
+    float rim = pow(0.62 - dot(vNormal, vec3(0,0,1)), 2.5);
+    vec3 baseAtmo = mix(vec3(0.0, 0.45, 1.0), vec3(0.0, 0.8, 0.3), 0.3);
+    vec3 stormCol = mix(baseAtmo, vec3(1.0, 0.12, 0.0), smoothstep(4.0, 8.0, uKp));
+    gl_FragColor = vec4(stormCol, rim * 0.65);
   }
 `;
 
-const gridVert = /* glsl */`
-  void main(){
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-  }
-`;
-const gridFrag = /* glsl */`
-  void main(){
-    gl_FragColor = vec4(0.0, 0.9, 1.0, 0.07);
-  }
-`;
+// ── Create glowing circle texture for markers ─────────────────────────────────
+function makeMarkerTexture(hex: number): THREE.CanvasTexture {
+  const S = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const ctx = c.getContext("2d")!;
+  const r = (hex >> 16) & 255;
+  const g = (hex >> 8) & 255;
+  const b = hex & 255;
+  const col = `${r},${g},${b}`;
 
-class GlobeErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  // Outer glow
+  const grd = ctx.createRadialGradient(S/2, S/2, S*0.05, S/2, S/2, S*0.5);
+  grd.addColorStop(0,   `rgba(${col},1.0)`);
+  grd.addColorStop(0.3, `rgba(${col},0.6)`);
+  grd.addColorStop(0.6, `rgba(${col},0.15)`);
+  grd.addColorStop(1,   `rgba(${col},0)`);
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, S, S);
+
+  // Inner bright core
+  ctx.beginPath();
+  ctx.arc(S/2, S/2, S*0.08, 0, Math.PI*2);
+  ctx.fillStyle = `rgb(${col})`;
+  ctx.fill();
+
+  const t = new THREE.CanvasTexture(c);
+  t.needsUpdate = true;
+  return t;
+}
+
+// ── Error boundary ────────────────────────────────────────────────────────────
+class GlobeErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
     this.state = { hasError: false };
@@ -179,47 +258,28 @@ export function Globe3D(props: Globe3DProps) {
   );
 }
 
-function Globe3DInner({ data, pred, risk }: Globe3DProps) {
+// ── Main component ────────────────────────────────────────────────────────────
+function Globe3DInner({ data, risk }: Globe3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef<{
-    renderer: THREE.WebGLRenderer;
-    scene: THREE.Scene;
-    camera: THREE.PerspectiveCamera;
-    earth: THREE.Mesh;
-    atmo: THREE.Mesh;
-    earthMat: THREE.ShaderMaterial;
-    atmoMat: THREE.ShaderMaterial;
-    markers: THREE.Group;
-    particles: THREE.Points;
-    particlePosArr: Float32Array;
-    raf: number;
-    isDragging: boolean;
-    lastMouse: { x: number; y: number };
-    rotY: number;
-    rotX: number;
-    targetRotY: number;
-    targetRotX: number;
-  } | null>(null);
 
-  const kp = data?.kpIndex ?? 2;
+  const kp    = data?.kpIndex ?? 2;
   const speed = data?.solarWind?.speed ?? 400;
   const riskData = risk;
 
-  // Risk level for each zone
   const getRiskVal = (system: string): number => {
     if (!riskData) return 5;
-    const v = (riskData as any)[system] as number | undefined;
-    return v ?? 5;
+    const v = (riskData as Record<string, unknown>)[system];
+    return typeof v === "number" ? v : 5;
   };
 
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
 
-    const W = el.clientWidth  || 600;
-    const H = el.clientHeight || 400;
+    const W = el.clientWidth  || 700;
+    const H = el.clientHeight || 500;
 
-    // ── Scene setup ──────────────────────────────────────────────────────
+    // Renderer
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -231,323 +291,258 @@ function Globe3DInner({ data, pred, risk }: Globe3DProps) {
     renderer.setClearColor(0x000000, 0);
     el.appendChild(renderer.domElement);
 
-    const scene = new THREE.Scene();
+    // Scene / Camera
+    const scene  = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 100);
-    camera.position.z = 2.8;
+    camera.position.set(0, 0, 2.8);
 
-    // ── Stars background ─────────────────────────────────────────────────
-    const starGeo = new THREE.BufferGeometry();
-    const starCount = 2000;
-    const starPos = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount * 3; i++) starPos[i] = (Math.random() - 0.5) * 80;
-    starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
-    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.06, transparent: true, opacity: 0.6 });
-    scene.add(new THREE.Points(starGeo, starMat));
+    // Lighting
+    const ambient = new THREE.AmbientLight(0x223344, 1.8);
+    scene.add(ambient);
+    const sunLight = new THREE.DirectionalLight(0xffffff, 2.4);
+    sunLight.position.set(3, 1.5, 3);
+    scene.add(sunLight);
+    const fillLight = new THREE.DirectionalLight(0x112244, 0.8);
+    fillLight.position.set(-2, -1, -2);
+    scene.add(fillLight);
 
-    // ── Earth ────────────────────────────────────────────────────────────
-    const earthGeo = new THREE.SphereGeometry(1, 64, 64);
-    const earthMat = new THREE.ShaderMaterial({
-      vertexShader: earthVert,
-      fragmentShader: earthFrag,
-      uniforms: { uTime: { value: 0 }, uKp: { value: kp } },
+    // Earth sphere
+    const earthGeo = new THREE.SphereGeometry(1, 64, 48);
+    const earthTex = buildEarthTexture();
+    const earthMat = new THREE.MeshPhongMaterial({
+      map: earthTex,
+      shininess: 30,
+      specular: new THREE.Color(0x113355),
     });
     const earth = new THREE.Mesh(earthGeo, earthMat);
     scene.add(earth);
 
-    // ── Atmosphere ───────────────────────────────────────────────────────
-    const atmoGeo = new THREE.SphereGeometry(1.08, 64, 64);
+    // Atmosphere glow
     const atmoMat = new THREE.ShaderMaterial({
-      vertexShader: atmosphereVert,
-      fragmentShader: atmosphereFrag,
+      vertexShader: atmoVert,
+      fragmentShader: atmoFrag,
       uniforms: { uKp: { value: kp } },
-      blending: THREE.AdditiveBlending,
-      side: THREE.BackSide,
       transparent: true,
+      side: THREE.FrontSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
+    const atmoGeo = new THREE.SphereGeometry(1.055, 48, 32);
     const atmo = new THREE.Mesh(atmoGeo, atmoMat);
     scene.add(atmo);
 
-    // ── Sci-fi grid wireframe ─────────────────────────────────────────────
-    const gridGeo = new THREE.SphereGeometry(1.01, 32, 16);
-    const gridMat = new THREE.ShaderMaterial({
-      vertexShader: gridVert,
-      fragmentShader: gridFrag,
-      transparent: true,
-      wireframe: true,
-    });
-    scene.add(new THREE.Mesh(gridGeo, gridMat));
+    // Aurora rings (polar)
+    const makeAuroraRing = (latDeg: number, sign: number) => {
+      const pts: THREE.Vector3[] = [];
+      const R = 1.012;
+      for (let i = 0; i <= 128; i++) {
+        const lon = (i / 128) * 360 - 180;
+        pts.push(latLonToXYZ(sign * latDeg, lon, R));
+      }
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const auroraColor = kp < 4 ? 0x00ff88 : kp < 7 ? 0xffaa00 : 0xff2200;
+      const mat = new THREE.LineBasicMaterial({
+        color: auroraColor,
+        transparent: true,
+        opacity: Math.min(kp / 6, 1) * 0.8,
+        blending: THREE.AdditiveBlending,
+      });
+      return new THREE.Line(geo, mat);
+    };
+    scene.add(makeAuroraRing(68, 1), makeAuroraRing(68, -1));
+    scene.add(makeAuroraRing(72, 1), makeAuroraRing(72, -1));
 
-    // ── Impact zone markers ──────────────────────────────────────────────
-    const markers = new THREE.Group();
-    scene.add(markers);
+    // Impact zone markers
+    const markerGroup = new THREE.Group();
+    scene.add(markerGroup);
 
     IMPACT_ZONES.forEach(zone => {
-      const rval = getRiskVal(zone.system);
-      const pos  = latLonToXYZ(zone.lat, zone.lon, 1.01);
+      const riskPct = getRiskVal(zone.system) / 100;
+      const pos = latLonToXYZ(zone.lat, zone.lon, 1.015);
+      const tex = makeMarkerTexture(zone.color);
 
-      // Glowing disc on surface
-      const discGeo = new THREE.CircleGeometry(0.045 + rval * 0.0012, 32);
-      const discMat = new THREE.MeshBasicMaterial({
+      // Sprite billboard
+      const sSize = 0.14 + riskPct * 0.16;
+      const spriteMat = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: 0.92,
+      });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.scale.setScalar(sSize);
+      sprite.position.copy(pos);
+      markerGroup.add(sprite);
+
+      // Outer ring
+      const ringPts: THREE.Vector3[] = [];
+      const ringR = 1.016;
+      const ringRadius = 0.04 + riskPct * 0.04;
+      for (let i = 0; i <= 64; i++) {
+        const a = (i / 64) * Math.PI * 2;
+        const p = latLonToXYZ(zone.lat, zone.lon, ringR);
+        // Offset in tangential plane
+        const north = latLonToXYZ(zone.lat + 0.1, zone.lon, ringR).sub(p).normalize();
+        const east  = new THREE.Vector3().crossVectors(p.clone().normalize(), north).normalize();
+        ringPts.push(
+          p.clone()
+           .add(north.clone().multiplyScalar(Math.cos(a) * ringRadius))
+           .add(east.clone().multiplyScalar(Math.sin(a) * ringRadius))
+        );
+      }
+      const rGeo = new THREE.BufferGeometry().setFromPoints(ringPts);
+      const rMat = new THREE.LineBasicMaterial({
         color: zone.color,
         transparent: true,
-        opacity: 0.25 + rval * 0.006,
-        side: THREE.DoubleSide,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
       });
-      const disc = new THREE.Mesh(discGeo, discMat);
-      disc.position.copy(pos);
-      disc.lookAt(new THREE.Vector3(0, 0, 0).multiplyScalar(-1).add(pos));
-      markers.add(disc);
+      markerGroup.add(new THREE.Line(rGeo, rMat));
 
-      // Outer ring pulse
-      const ringGeo = new THREE.RingGeometry(0.055 + rval * 0.001, 0.07 + rval * 0.001, 32);
-      const ringMat = new THREE.MeshBasicMaterial({
+      // Spike out from surface
+      const spikeMat = new THREE.LineBasicMaterial({
         color: zone.color,
         transparent: true,
         opacity: 0.7,
-        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
       });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.position.copy(pos);
-      ring.lookAt(new THREE.Vector3(0, 0, 0).multiplyScalar(-1).add(pos));
-      ring.userData.baseOpacity = 0.7;
-      ring.userData.phase       = Math.random() * Math.PI * 2;
-      markers.add(ring);
-
-      // Vertical spike
-      const spikeGeo = new THREE.CylinderGeometry(0.003, 0.001, 0.15 + rval * 0.002, 6);
-      const spikeMat = new THREE.MeshBasicMaterial({ color: zone.color, transparent: true, opacity: 0.6 });
-      const spike = new THREE.Mesh(spikeGeo, spikeMat);
-      const mid = pos.clone().normalize().multiplyScalar(1.08);
-      spike.position.copy(mid);
-      spike.lookAt(mid.clone().multiplyScalar(2));
-      spike.rotateX(Math.PI / 2);
-      markers.add(spike);
+      const spikeGeo = new THREE.BufferGeometry().setFromPoints([
+        pos.clone().multiplyScalar(1.0),
+        pos.clone().multiplyScalar(1.0 + 0.04 + riskPct * 0.06),
+      ]);
+      markerGroup.add(new THREE.Line(spikeGeo, spikeMat));
     });
 
-    // ── Aurora polar ring ─────────────────────────────────────────────────
-    const auroraMinLat = 90 - Math.max(40, 75 - kp * 3.5);
-    const auroraRadius = Math.cos((auroraMinLat * Math.PI) / 180);
-    const auroraY      = Math.sin((auroraMinLat * Math.PI) / 180);
-    const auroraGeo    = new THREE.TorusGeometry(auroraRadius, 0.018, 16, 120);
-    const auroraColor  = kp > 6 ? 0xff2200 : kp > 4 ? 0xffaa00 : 0x00ff88;
-    const auroraMat    = new THREE.MeshBasicMaterial({ color: auroraColor, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
-    const auroraRingN  = new THREE.Mesh(auroraGeo, auroraMat);
-    auroraRingN.position.y = auroraY;
-    scene.add(auroraRingN);
-    const auroraRingS  = auroraRingN.clone();
-    auroraRingS.position.y = -auroraY;
-    scene.add(auroraRingS);
-
-    // ── Solar wind particles ──────────────────────────────────────────────
-    const pCount = 600;
-    const pPositions = new Float32Array(pCount * 3);
-    const pVelocities = new Float32Array(pCount * 3);
-    for (let i = 0; i < pCount; i++) {
-      const r = 2.5 + Math.random() * 1.5;
-      const theta = Math.random() * Math.PI * 2;
-      const phi   = (Math.random() - 0.5) * Math.PI * 0.5;
-      pPositions[i*3]   = r * Math.cos(phi) * Math.cos(theta);
-      pPositions[i*3+1] = r * Math.sin(phi);
-      pPositions[i*3+2] = r * Math.cos(phi) * Math.sin(theta);
-      pVelocities[i*3]   = (Math.random() - 0.5) * 0.002;
-      pVelocities[i*3+1] = (Math.random() - 0.5) * 0.002;
-      pVelocities[i*3+2] = -(0.004 + Math.random() * 0.006) * (speed / 400);
+    // Solar wind particles
+    const NPART = 800;
+    const pPos = new Float32Array(NPART * 3);
+    const pVel = new Float32Array(NPART);
+    for (let i = 0; i < NPART; i++) {
+      pPos[i*3]   = (Math.random() - 0.5) * 6;
+      pPos[i*3+1] = (Math.random() - 0.5) * 4;
+      pPos[i*3+2] = -2 - Math.random() * 3;
+      pVel[i]     = 0.008 + Math.random() * 0.012;
     }
-    const particleGeo = new THREE.BufferGeometry();
-    particleGeo.setAttribute("position", new THREE.BufferAttribute(pPositions, 3));
-    const particleMat = new THREE.PointsMaterial({
-      color: 0x44ddff,
-      size: 0.018,
+    const pGeo = new THREE.BufferGeometry();
+    pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
+    const pMat = new THREE.PointsMaterial({
+      color: 0x00aaff,
+      size: 0.025,
       transparent: true,
       opacity: 0.55,
       blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
-    const particles = new THREE.Points(particleGeo, particleMat);
+    const particles = new THREE.Points(pGeo, pMat);
     scene.add(particles);
 
-    // ── Interaction: drag to rotate ───────────────────────────────────────
+    // Drag to rotate
     let isDragging = false;
     let lastMouse = { x: 0, y: 0 };
-    let rotY = 0;
-    let rotX = 0.15;
-    let targetRotY = 0;
-    let targetRotX = 0.15;
+    let rotY = 0, rotX = 0.12;
+    let targetRotY = 0, targetRotX = 0.12;
 
-    const onMouseDown = (e: MouseEvent) => {
-      isDragging = true; lastMouse = { x: e.clientX, y: e.clientY };
-    };
-    const onMouseMove = (e: MouseEvent) => {
+    const onDown = (e: MouseEvent) => { isDragging = true; lastMouse = { x: e.clientX, y: e.clientY }; };
+    const onUp   = () => { isDragging = false; };
+    const onMove = (e: MouseEvent) => {
       if (!isDragging) return;
-      targetRotY += (e.clientX - lastMouse.x) * 0.005;
-      targetRotX += (e.clientY - lastMouse.y) * 0.003;
-      targetRotX  = Math.max(-0.6, Math.min(0.6, targetRotX));
-      lastMouse    = { x: e.clientX, y: e.clientY };
+      targetRotY += (e.clientX - lastMouse.x) * 0.008;
+      targetRotX += (e.clientY - lastMouse.y) * 0.005;
+      targetRotX = Math.max(-0.6, Math.min(0.6, targetRotX));
+      lastMouse = { x: e.clientX, y: e.clientY };
     };
-    const onMouseUp = () => { isDragging = false; };
+    el.addEventListener("mousedown", onDown);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("mousemove", onMove);
 
-    const onTouchStart = (e: TouchEvent) => {
-      isDragging = true; lastMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (!isDragging) return;
-      targetRotY += (e.touches[0].clientX - lastMouse.x) * 0.005;
-      targetRotX += (e.touches[0].clientY - lastMouse.y) * 0.003;
-      lastMouse    = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    };
-
-    el.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    el.addEventListener("touchstart", onTouchStart);
-    window.addEventListener("touchmove", onTouchMove);
-    window.addEventListener("touchend", onMouseUp);
-
-    // ── Animation loop ────────────────────────────────────────────────────
+    // Animation loop
     let raf = 0;
     let t = 0;
-
     const animate = () => {
       raf = requestAnimationFrame(animate);
-      t += 0.016;
+      t += 0.01;
 
       // Auto-rotate
-      if (!isDragging) targetRotY += 0.0015;
-      rotY += (targetRotY - rotY) * 0.06;
-      rotX += (targetRotX - rotX) * 0.06;
-
-      earth.rotation.y = rotY;
-      earth.rotation.x = rotX;
-      atmo.rotation.y  = rotY;
-      atmo.rotation.x  = rotX;
-      markers.rotation.y = rotY;
-      markers.rotation.x = rotX;
-      auroraRingN.rotation.y = rotY * 0.3;
-      auroraRingS.rotation.y = rotY * 0.3;
-
-      // Update uniforms
-      earthMat.uniforms.uTime.value = t;
+      if (!isDragging) targetRotY += 0.002;
+      rotY += (targetRotY - rotY) * 0.07;
+      rotX += (targetRotX - rotX) * 0.07;
+      earth.rotation.set(rotX, rotY, 0);
+      atmo.rotation.set(rotX, rotY, 0);
+      markerGroup.rotation.set(rotX, rotY, 0);
 
       // Pulse markers
-      markers.children.forEach(child => {
-        if (child.userData.phase !== undefined) {
-          const mat = (child as THREE.Mesh).material as THREE.MeshBasicMaterial;
-          mat.opacity = child.userData.baseOpacity * (0.5 + 0.5 * Math.sin(t * 2 + child.userData.phase));
+      markerGroup.children.forEach((child, i) => {
+        if (child instanceof THREE.Sprite) {
+          const base = 0.14 + (getRiskVal(IMPACT_ZONES[Math.floor(i / 3)]?.system ?? "") / 100) * 0.16;
+          const pulse = 1 + Math.sin(t * 3 + i) * 0.18;
+          child.scale.setScalar(base * pulse);
         }
       });
 
-      // Solar wind particles drift inward
-      const pos = particleGeo.attributes.position;
-      for (let i = 0; i < pCount; i++) {
-        pos.array[i*3]   += pVelocities[i*3];
-        pos.array[i*3+1] += pVelocities[i*3+1];
-        pos.array[i*3+2] += pVelocities[i*3+2];
-        const dist = Math.sqrt(
-          pos.array[i*3]**2 + pos.array[i*3+1]**2 + pos.array[i*3+2]**2
-        );
-        if (dist < 1.1) {
-          const r2 = 2.5 + Math.random() * 1.5;
-          const th = Math.random() * Math.PI * 2;
-          const ph = (Math.random() - 0.5) * Math.PI * 0.5;
-          pos.array[i*3]   = r2 * Math.cos(ph) * Math.cos(th);
-          pos.array[i*3+1] = r2 * Math.sin(ph);
-          pos.array[i*3+2] = r2 * Math.cos(ph) * Math.sin(th);
+      // Solar wind: move particles toward earth
+      const windSpeed = (speed / 400) * 0.012;
+      const posArr = pGeo.attributes.position.array as Float32Array;
+      for (let i = 0; i < NPART; i++) {
+        posArr[i*3+2] += pVel[i] * (windSpeed / 0.012);
+        if (posArr[i*3+2] > 1.5) {
+          posArr[i*3]   = (Math.random() - 0.5) * 6;
+          posArr[i*3+1] = (Math.random() - 0.5) * 4;
+          posArr[i*3+2] = -4;
         }
       }
-      pos.needsUpdate = true;
+      pGeo.attributes.position.needsUpdate = true;
 
       renderer.render(scene, camera);
     };
     animate();
 
-    // ── Resize handler ────────────────────────────────────────────────────
-    const onResize = () => {
-      const w = el.clientWidth  || 600;
-      const h = el.clientHeight || 400;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    const ro = new ResizeObserver(onResize);
-    ro.observe(el);
-
-    stateRef.current = {
-      renderer, scene, camera, earth, atmo, earthMat, atmoMat,
-      markers, particles, particlePosArr: pPositions,
-      raf, isDragging, lastMouse, rotY, rotX, targetRotY, targetRotX,
-    };
-
     return () => {
       cancelAnimationFrame(raf);
-      ro.disconnect();
-      el.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      el.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("touchend", onMouseUp);
-      if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
+      el.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("mousemove", onMove);
       renderer.dispose();
+      earthTex.dispose();
+      earthMat.dispose();
+      atmoMat.dispose();
+      if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update uniforms on data change without remounting
-  useEffect(() => {
-    const s = stateRef.current;
-    if (!s) return;
-    s.earthMat.uniforms.uKp.value = kp;
-    s.atmoMat.uniforms.uKp.value  = kp;
-  }, [kp]);
-
-  // Legend entries
-  const legendItems = useMemo(() => [
+  // Legend data
+  const legendItems = [
     { color: "#00f0ff", label: "HF Radyo" },
     { color: "#ffaa00", label: "Elektrik Şebekesi" },
-    { color: "#39ff14", label: "GPS/GNSS" },
-    { color: "#cc44ff", label: "Uydu Operasyonları" },
+    { color: "#39ff14", label: "GPS / Uydu" },
+    { color: "#cc44ff", label: "Uydu Operasyonu" },
     { color: "#ff4444", label: "Havacılık" },
-  ], []);
-
-  const stormLabel =
-    kp >= 8 ? "G4-G5 AŞIRI FIRTINA" :
-    kp >= 6 ? "G2-G3 ŞİDDETLİ FIRTINA" :
-    kp >= 5 ? "G1 HAFIF FIRTINA" :
-    kp >= 4 ? "YÜKSEK AKTİVİTE" : "SAKIN";
-
-  const stormColor =
-    kp >= 6 ? "#ff3333" : kp >= 4 ? "#ffaa00" : "#00ff88";
+  ];
 
   return (
-    <div className="relative w-full h-full flex flex-col overflow-hidden rounded-xl bg-[#020b16]">
-      {/* Header overlay */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-2 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: stormColor, boxShadow: `0 0 8px ${stormColor}` }} />
-          <span className="font-display text-[10px] tracking-widest uppercase" style={{ color: stormColor }}>
-            {stormLabel}
-          </span>
-        </div>
-        <div className="font-mono text-[10px] text-cyan-400/70 tracking-wider">
-          Kp {kp.toFixed(1)} · {(data?.solarWind?.speed ?? 0).toFixed(0)} km/s
-        </div>
-      </div>
-
-      {/* Three.js canvas mount */}
-      <div ref={mountRef} className="w-full flex-1 cursor-grab active:cursor-grabbing" />
+    <div className="relative w-full h-full bg-[#010913]">
+      <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
       {/* Legend */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 px-4 py-2 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
-        <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center">
-          {legendItems.map(item => (
-            <div key={item.label} className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full" style={{ background: item.color, boxShadow: `0 0 5px ${item.color}` }} />
-              <span className="font-mono text-[9px] text-white/60">{item.label}</span>
-            </div>
-          ))}
-        </div>
-        <div className="text-center font-display text-[9px] text-white/30 mt-0.5 tracking-widest">
-          SÜRÜKLE → DÖNDÜREBİLİRSİN
-        </div>
+      <div className="absolute bottom-3 left-3 flex flex-col gap-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 backdrop-blur-sm">
+        {legendItems.map(item => (
+          <div key={item.label} className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: item.color, boxShadow: `0 0 4px ${item.color}` }} />
+            <span className="font-mono text-[9px] text-white/60">{item.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Kp badge */}
+      <div className="absolute top-3 right-3 bg-black/50 border border-cyan-400/30 rounded px-2 py-1">
+        <span className="font-display text-[9px] text-cyan-400/70 uppercase tracking-widest">Kp</span>
+        <span className="font-mono text-sm text-cyan-300 ml-1.5">{(data?.kpIndex ?? 0).toFixed(1)}</span>
+      </div>
+
+      {/* Drag hint */}
+      <div className="absolute top-3 left-3">
+        <span className="font-mono text-[9px] text-white/25">↺ sürükle</span>
       </div>
     </div>
   );
