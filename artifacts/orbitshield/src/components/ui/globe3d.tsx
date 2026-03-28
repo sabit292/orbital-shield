@@ -225,63 +225,9 @@ function makeMarkerTexture(hex: number): THREE.CanvasTexture {
   return t;
 }
 
-// ── Create text label sprite texture ─────────────────────────────────────────
-function makeTextSprite(label: string, hex: number): THREE.CanvasTexture {
-  // High DPI: render at 4× then display small → crisp text
-  const SCALE = 4;
-  const PX = 28 * SCALE;
-  const padX = 16 * SCALE;
-  const padY = 10 * SCALE;
-
-  const tmpC = document.createElement("canvas");
-  tmpC.width = 2; tmpC.height = 2;
-  const tmpCtx = tmpC.getContext("2d")!;
-  tmpCtx.font = `700 ${PX}px 'Courier New', monospace`;
-  const textW = tmpCtx.measureText(label).width;
-
-  const W = Math.ceil(textW + padX * 2);
-  const H = Math.ceil(PX + padY * 2);
-  const c = document.createElement("canvas");
-  c.width = W; c.height = H;
-  const ctx = c.getContext("2d")!;
-
-  const r = (hex >> 16) & 255;
-  const g = (hex >> 8) & 255;
-  const b = hex & 255;
-  const col = `${r},${g},${b}`;
-  const rad = 10 * SCALE;
-
-  // Dark pill background
-  ctx.fillStyle = `rgba(2,8,20,0.88)`;
-  ctx.beginPath();
-  ctx.moveTo(rad, 0);
-  ctx.lineTo(W - rad, 0);
-  ctx.arcTo(W, 0, W, rad, rad);
-  ctx.lineTo(W, H - rad);
-  ctx.arcTo(W, H, W - rad, H, rad);
-  ctx.lineTo(rad, H);
-  ctx.arcTo(0, H, 0, H - rad, rad);
-  ctx.lineTo(0, rad);
-  ctx.arcTo(0, 0, rad, 0, rad);
-  ctx.closePath();
-  ctx.fill();
-
-  // Colored border
-  ctx.strokeStyle = `rgba(${col},0.9)`;
-  ctx.lineWidth = 3 * SCALE;
-  ctx.stroke();
-
-  // Text with glow
-  ctx.font = `700 ${PX}px 'Courier New', monospace`;
-  ctx.textBaseline = "middle";
-  ctx.shadowColor = `rgba(${col},1)`;
-  ctx.shadowBlur = 6 * SCALE;
-  ctx.fillStyle = `rgb(255,255,255)`;
-  ctx.fillText(label, padX, H / 2);
-
-  const t = new THREE.CanvasTexture(c);
-  t.needsUpdate = true;
-  return t;
+// hex color → css hex string
+function hexToCss(hex: number): string {
+  return "#" + hex.toString(16).padStart(6, "0");
 }
 
 // ── Error boundary ────────────────────────────────────────────────────────────
@@ -320,6 +266,7 @@ export function Globe3D(props: Globe3DProps) {
 // ── Main component ────────────────────────────────────────────────────────────
 function Globe3DInner({ data, risk }: Globe3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
+  const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const kp    = data?.kpIndex ?? 2;
   const speed = data?.solarWind?.speed ?? 400;
@@ -472,25 +419,6 @@ function Globe3DInner({ data, risk }: Globe3DProps) {
         pos.clone().multiplyScalar(1.0 + spikeLen),
       ]);
       markerGroup.add(new THREE.Line(spikeGeo, spikeMat));
-
-      // Text label at spike tip
-      const labelTex = makeTextSprite(zone.label, zone.color);
-      const labelMat = new THREE.SpriteMaterial({
-        map: labelTex,
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.NormalBlending,
-        opacity: 0.95,
-      });
-      const labelSprite = new THREE.Sprite(labelMat);
-      // Scale to keep text readable — aspect ratio from canvas
-      const aspect = labelTex.image.width / labelTex.image.height;
-      const labelH = 0.11;
-      labelSprite.scale.set(labelH * aspect, labelH, 1);
-      // Position at spike tip + small offset
-      const labelPos = pos.clone().multiplyScalar(1.0 + spikeLen + 0.07);
-      labelSprite.position.copy(labelPos);
-      markerGroup.add(labelSprite);
     });
 
     // Solar wind particles
@@ -535,9 +463,16 @@ function Globe3DInner({ data, risk }: Globe3DProps) {
     window.addEventListener("mouseup", onUp);
     window.addEventListener("mousemove", onMove);
 
+    // Pre-compute spike lengths per zone for label positioning
+    const spikeLens = IMPACT_ZONES.map(z => 0.06 + (getRiskVal(z.system) / 100) * 0.07);
+
     // Animation loop
     let raf = 0;
     let t = 0;
+    const euler = new THREE.Euler();
+    const tmpVec = new THREE.Vector3();
+    const labels = labelRefs.current;
+
     const animate = () => {
       raf = requestAnimationFrame(animate);
       t += 0.01;
@@ -549,11 +484,35 @@ function Globe3DInner({ data, risk }: Globe3DProps) {
       earth.rotation.set(rotX, rotY, 0);
       atmo.rotation.set(rotX, rotY, 0);
       markerGroup.rotation.set(rotX, rotY, 0);
+      euler.set(rotX, rotY, 0);
 
-      // Pulse markers
+      // Project HTML labels into screen space
+      IMPACT_ZONES.forEach((zone, i) => {
+        const labelEl = labels[i];
+        if (!labelEl) return;
+        const spikeLen = spikeLens[i];
+        // Label world position = spike tip + small extra
+        tmpVec.copy(latLonToXYZ(zone.lat, zone.lon, 1.0 + spikeLen + 0.08));
+        tmpVec.applyEuler(euler);
+        // Visibility: normal must face camera (positive z after rotation)
+        const normalZ = tmpVec.clone().normalize().z;
+        if (normalZ < 0.05) {
+          labelEl.style.opacity = "0";
+          return;
+        }
+        // Project to NDC then to pixels
+        const projected = tmpVec.clone().project(camera);
+        const px = (projected.x * 0.5 + 0.5) * W;
+        const py = (-projected.y * 0.5 + 0.5) * H;
+        labelEl.style.transform = `translate(${px}px,${py}px) translate(-50%,-100%)`;
+        labelEl.style.opacity = String(Math.min(1, (normalZ - 0.05) / 0.15));
+      });
+
+      // Pulse glow markers (Sprites only — index 0 per zone group of 3)
       markerGroup.children.forEach((child, i) => {
         if (child instanceof THREE.Sprite) {
-          const base = 0.14 + (getRiskVal(IMPACT_ZONES[Math.floor(i / 3)]?.system ?? "") / 100) * 0.16;
+          const zoneIdx = Math.floor(i / 3);
+          const base = 0.14 + (getRiskVal(IMPACT_ZONES[zoneIdx]?.system ?? "") / 100) * 0.16;
           const pulse = 1 + Math.sin(t * 3 + i) * 0.18;
           child.scale.setScalar(base * pulse);
         }
@@ -602,6 +561,41 @@ function Globe3DInner({ data, risk }: Globe3DProps) {
   return (
     <div className="relative w-full h-full bg-[#010913]">
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+
+      {/* HTML label overlays — perfectly sharp, browser-rendered text */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        {IMPACT_ZONES.map((zone, i) => {
+          const css = hexToCss(zone.color);
+          return (
+            <div
+              key={zone.label}
+              ref={el => { labelRefs.current[i] = el; }}
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                opacity: 0,
+                whiteSpace: "nowrap",
+                fontFamily: "'Courier New', monospace",
+                fontSize: "11px",
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                color: "#ffffff",
+                background: "rgba(2,8,22,0.88)",
+                border: `1px solid ${css}`,
+                borderRadius: "4px",
+                padding: "2px 6px",
+                boxShadow: `0 0 8px ${css}60, inset 0 0 4px ${css}20`,
+                textShadow: `0 0 6px ${css}`,
+                transition: "opacity 0.08s",
+                lineHeight: "1.4",
+              }}
+            >
+              {zone.label}
+            </div>
+          );
+        })}
+      </div>
 
       {/* Legend */}
       <div className="absolute bottom-3 left-3 flex flex-col gap-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 backdrop-blur-sm">
