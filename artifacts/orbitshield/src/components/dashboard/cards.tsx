@@ -1101,16 +1101,18 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
   if (!risk) return <Panel title="ALTYAPI RİSK ANALİZİ" />;
 
   const items = [
-    { label: "GPS / GNSS", val: risk.gpsGnss, p1: risk.predicted1h?.gpsGnss, icon: <Navigation className="w-3 h-3"/> },
-    { label: "Uydu Operasyonları", val: risk.satelliteOps, p1: risk.predicted1h?.satelliteOps, icon: <Radio className="w-3 h-3"/> },
-    { label: "Elektrik Şebekesi", val: risk.powerGrid, p1: risk.predicted1h?.powerGrid, icon: <Zap className="w-3 h-3"/> },
-    { label: "HF Radyo", val: risk.hfRadio, p1: risk.predicted1h?.hfRadio, icon: <Wifi className="w-3 h-3"/> },
-    { label: "Havacılık", val: risk.aviation, p1: risk.predicted1h?.aviation, icon: <Plane className="w-3 h-3"/> },
-    { label: "İnsan Sağlığı", val: risk.humanHealth, p1: risk.predicted1h?.humanHealth, icon: <Heart className="w-3 h-3"/> },
+    { label: "GPS / GNSS",           val: risk.gpsGnss,      icon: <Navigation className="w-3 h-3"/> },
+    { label: "Uydu Operasyonları",   val: risk.satelliteOps, icon: <Radio className="w-3 h-3"/> },
+    { label: "Elektrik Şebekesi",    val: risk.powerGrid,    icon: <Zap className="w-3 h-3"/> },
+    { label: "HF Radyo",             val: risk.hfRadio,      icon: <Wifi className="w-3 h-3"/> },
+    { label: "Havacılık",            val: risk.aviation,     icon: <Plane className="w-3 h-3"/> },
+    { label: "İnsan Sağlığı",        val: risk.humanHealth,  icon: <Heart className="w-3 h-3"/> },
   ];
 
-  const trendIcon = risk.trend === "RISING" ? "▲" : risk.trend === "FALLING" ? "▼" : "▶";
+  const trendIcon  = risk.trend === "RISING" ? "▲" : risk.trend === "FALLING" ? "▼" : "▶";
   const trendColor = risk.trend === "RISING" ? "text-danger" : risk.trend === "FALLING" ? "text-success" : "text-primary";
+  const overall    = risk.overallRisk ?? 0;
+  const overallColor = overall >= 70 ? "text-danger" : overall >= 40 ? "text-warning" : "text-success";
 
   return (
     <Panel 
@@ -1123,26 +1125,20 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
         </span>
       }
     >
-      {/* Legend */}
-      <div className="flex gap-3 mb-3 mt-1">
-        <div className="flex items-center gap-1.5 text-[9px] font-mono text-muted-foreground">
-          <div className="w-3 h-1.5 rounded-full bg-primary/70" /> ŞİMDİ
-        </div>
-        <div className="flex items-center gap-1.5 text-[9px] font-mono text-muted-foreground">
-          <div className="w-3 h-1.5 rounded-full bg-white/25 border border-white/30" /> 1 SAAT SONRA (YZ)
-        </div>
+      {/* Genel risk özeti */}
+      <div className="flex items-center justify-between mb-3 mt-1 px-1">
+        <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">GENEL RİSK (NOAA)</span>
+        <span className={cn("font-mono font-bold text-sm", overallColor)}>{overall}%</span>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {items.map((item, i) => {
-          const cur = item.val;
-          const pred = item.p1 ?? cur;
-          const delta = pred - cur;
-          const color = cur < 30 ? "bg-success" : cur < 60 ? "bg-warning" : "bg-danger";
-          const glow = cur < 30 ? "shadow-[0_0_6px_hsl(var(--success))]" :
-                       cur < 60 ? "shadow-[0_0_6px_hsl(var(--warning))]" :
-                       "shadow-[0_0_6px_hsl(var(--danger))]";
-          const predColor = pred < 30 ? "bg-success/40" : pred < 60 ? "bg-warning/40" : "bg-danger/40";
+          const cur = item.val ?? 0;
+          const color  = cur < 30 ? "bg-success"  : cur < 60 ? "bg-warning"  : "bg-danger";
+          const glow   = cur < 30 ? "shadow-[0_0_5px_hsl(var(--success))]" :
+                         cur < 60 ? "shadow-[0_0_5px_hsl(var(--warning))]" :
+                                    "shadow-[0_0_5px_hsl(var(--danger))]";
+          const valColor = cur < 30 ? "text-success" : cur < 60 ? "text-warning" : "text-danger";
 
           return (
             <div key={i} className="space-y-1">
@@ -1150,25 +1146,13 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
                 <span className="flex items-center gap-1.5 text-muted-foreground uppercase tracking-wide">
                   {item.icon} {item.label}
                 </span>
-                <div className="flex items-center">
-                  <span className="font-mono font-bold">{cur}%</span>
-                  <DeltaBadge delta={delta} />
-                </div>
+                <span className={cn("font-mono font-bold text-xs", valColor)}>{cur}%</span>
               </div>
-              {/* Stacked bar: current + predicted overlay */}
-              <div className="relative h-2 w-full bg-white/5 rounded-full overflow-hidden">
-                {/* Predicted bar (behind, lighter) */}
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${pred}%` }}
-                  transition={{ duration: 0.8, delay: i * 0.08 }}
-                  className={cn("absolute inset-y-0 left-0 rounded-full", predColor)}
-                />
-                {/* Current bar (front, solid) */}
+              <div className="relative h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: `${cur}%` }}
-                  transition={{ duration: 0.8, delay: i * 0.08 }}
+                  transition={{ duration: 0.8, delay: i * 0.07 }}
                   className={cn("absolute inset-y-0 left-0 rounded-full", color, glow)}
                 />
               </div>
@@ -1177,14 +1161,12 @@ export function InfrastructureCard({ risk }: { risk?: InfrastructureRisk }) {
         })}
       </div>
 
-      {/* Formül notu */}
-      <div className="mt-3 border-t border-white/5 pt-2">
-        <div className="text-[9px] font-mono text-muted-foreground/40 leading-relaxed">
-          R = 100·(0.25·Kp/9 + 0.25·|Dst|/500 + 0.30·|dB/dt|/1000 + 0.10·V/1000 + 0.10·P/100)·L
-        </div>
-        <div className="text-[9px] font-mono text-muted-foreground/30 mt-0.5">
-          L: Türkiye=0.8 · Uydu=1.1 · HF/GPS=1.0 · Havacılık=0.9
-        </div>
+      {/* Kaynak notu */}
+      <div className="mt-3 border-t border-white/5 pt-2 flex items-center gap-1.5">
+        <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+        <span className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider">
+          NOAA SWPC · Kp · Dst · V · P · dB/dt
+        </span>
       </div>
     </Panel>
   );
