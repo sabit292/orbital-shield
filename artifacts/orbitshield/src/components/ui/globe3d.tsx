@@ -227,16 +227,20 @@ function makeMarkerTexture(hex: number): THREE.CanvasTexture {
 
 // ── Create text label sprite texture ─────────────────────────────────────────
 function makeTextSprite(label: string, hex: number): THREE.CanvasTexture {
-  const PX = 22;
-  const padding = 10;
+  // High DPI: render at 4× then display small → crisp text
+  const SCALE = 4;
+  const PX = 28 * SCALE;
+  const padX = 16 * SCALE;
+  const padY = 10 * SCALE;
+
   const tmpC = document.createElement("canvas");
   tmpC.width = 2; tmpC.height = 2;
   const tmpCtx = tmpC.getContext("2d")!;
-  tmpCtx.font = `bold ${PX}px monospace`;
+  tmpCtx.font = `700 ${PX}px 'Courier New', monospace`;
   const textW = tmpCtx.measureText(label).width;
 
-  const W = Math.ceil(textW + padding * 2);
-  const H = PX + padding * 2;
+  const W = Math.ceil(textW + padX * 2);
+  const H = Math.ceil(PX + padY * 2);
   const c = document.createElement("canvas");
   c.width = W; c.height = H;
   const ctx = c.getContext("2d")!;
@@ -245,30 +249,35 @@ function makeTextSprite(label: string, hex: number): THREE.CanvasTexture {
   const g = (hex >> 8) & 255;
   const b = hex & 255;
   const col = `${r},${g},${b}`;
+  const rad = 10 * SCALE;
 
-  // Pill background
-  ctx.fillStyle = `rgba(0,0,0,0.72)`;
-  if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
-    ctx.beginPath();
-    (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void })
-      .roundRect(0, 0, W, H, 6);
-    ctx.fill();
-  } else {
-    ctx.fillRect(0, 0, W, H);
-  }
+  // Dark pill background
+  ctx.fillStyle = `rgba(2,8,20,0.88)`;
+  ctx.beginPath();
+  ctx.moveTo(rad, 0);
+  ctx.lineTo(W - rad, 0);
+  ctx.arcTo(W, 0, W, rad, rad);
+  ctx.lineTo(W, H - rad);
+  ctx.arcTo(W, H, W - rad, H, rad);
+  ctx.lineTo(rad, H);
+  ctx.arcTo(0, H, 0, H - rad, rad);
+  ctx.lineTo(0, rad);
+  ctx.arcTo(0, 0, rad, 0, rad);
+  ctx.closePath();
+  ctx.fill();
 
-  // Border glow
-  ctx.strokeStyle = `rgba(${col},0.85)`;
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(1, 1, W - 2, H - 2);
+  // Colored border
+  ctx.strokeStyle = `rgba(${col},0.9)`;
+  ctx.lineWidth = 3 * SCALE;
+  ctx.stroke();
 
-  // Text
-  ctx.font = `bold ${PX}px monospace`;
+  // Text with glow
+  ctx.font = `700 ${PX}px 'Courier New', monospace`;
   ctx.textBaseline = "middle";
-  ctx.fillStyle = `rgb(${col})`;
-  ctx.shadowColor = `rgb(${col})`;
-  ctx.shadowBlur = 8;
-  ctx.fillText(label, padding, H / 2);
+  ctx.shadowColor = `rgba(${col},1)`;
+  ctx.shadowBlur = 6 * SCALE;
+  ctx.fillStyle = `rgb(255,255,255)`;
+  ctx.fillText(label, padX, H / 2);
 
   const t = new THREE.CanvasTexture(c);
   t.needsUpdate = true;
@@ -476,10 +485,10 @@ function Globe3DInner({ data, risk }: Globe3DProps) {
       const labelSprite = new THREE.Sprite(labelMat);
       // Scale to keep text readable — aspect ratio from canvas
       const aspect = labelTex.image.width / labelTex.image.height;
-      const labelH = 0.085;
+      const labelH = 0.11;
       labelSprite.scale.set(labelH * aspect, labelH, 1);
       // Position at spike tip + small offset
-      const labelPos = pos.clone().multiplyScalar(1.0 + spikeLen + 0.055);
+      const labelPos = pos.clone().multiplyScalar(1.0 + spikeLen + 0.07);
       labelSprite.position.copy(labelPos);
       markerGroup.add(labelSprite);
     });
